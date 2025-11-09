@@ -252,6 +252,17 @@ static void csi_callback(void *ctx __attribute__((unused)), wifi_csi_info_t *dat
 }
 
 static void csi_init(void) {
+#if CONFIG_IDF_TARGET_ESP32C6
+    // ESP32-C6 uses simplified wifi_csi_acquire_config_t structure
+    // It doesn't support the advanced LTF configuration fields
+    wifi_csi_acquire_config_t csi_config = {
+        .enable = 1,
+    };
+    
+    ESP_ERROR_CHECK(esp_wifi_set_csi_config(&csi_config));
+    ESP_LOGI(TAG, "CSI initialized and enabled (ESP32-C6 simplified mode)");
+#else
+    // ESP32 and ESP32-S3 use wifi_csi_config_t with advanced LTF fields
     wifi_csi_config_t csi_config = {
         .lltf_en = true,
         .htltf_en = true,
@@ -262,10 +273,12 @@ static void csi_init(void) {
     };
     
     ESP_ERROR_CHECK(esp_wifi_set_csi_config(&csi_config));
+    ESP_LOGI(TAG, "CSI initialized and enabled (ESP32/ESP32-S3 advanced mode)");
+#endif
+    
+    // Common CSI setup for all targets
     ESP_ERROR_CHECK(esp_wifi_set_csi_rx_cb(csi_callback, NULL));
     ESP_ERROR_CHECK(esp_wifi_set_csi(true));
-    
-    ESP_LOGI(TAG, "CSI initialized and enabled");
 }
 
 static void mqtt_publish_task(void *pvParameters) {

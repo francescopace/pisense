@@ -7,8 +7,10 @@
 ---
 
 **Hardware:**
-- ESP32-S3-DevKitC-1 N16R8 (16MB Flash, 8MB PSRAM)
-- USB-C cable
+- **ESP32-S3** (recommended): ESP32-S3-DevKitC-1 N16R8 (16MB Flash, 8MB PSRAM)
+- **ESP32-C6**: Any ESP32-C6 development board
+- **ESP32 (classic)**: ESP32-D0WD or ESP32-WROOM-32 (without PSRAM)
+- USB-C or Micro-USB cable (depending on board)
 - Wi-Fi router (2.4 GHz)
 
 **Software:**
@@ -53,12 +55,32 @@ Download [ESP-IDF Windows Installer](https://dl.espressif.com/dl/esp-idf/)
 git clone https://github.com/francescopace/espectre.git
 cd espectre
 
-# Set target (IMPORTANT)
-idf.py set-target esp32s3
+# IMPORTANT: Copy the correct configuration for your ESP32 chip
+# This ensures all critical settings are properly applied
+
+# Clean any previous build and configuration
+idf.py fullclean
+rm -f sdkconfig
+
+# For ESP32-S3 (recommended, with PSRAM):
+cp sdkconfig.defaults.esp32s3 sdkconfig.defaults
+
+# For ESP32-C6 (simplified CSI, no PSRAM):
+cp sdkconfig.defaults.esp32c6 sdkconfig.defaults
+
+# For ESP32 classic (no PSRAM):
+cp sdkconfig.defaults.esp32 sdkconfig.defaults
 
 # Configure Wi-Fi and MQTT
 idf.py menuconfig
 ```
+
+**Target-specific configurations:**
+- **ESP32-S3**: Uses advanced CSI features (LTF configuration), supports PSRAM for larger buffers (8MB)
+- **ESP32-C6**: Uses simplified CSI API (basic configuration only), reduced memory buffers, no PSRAM
+- **ESP32 (classic)**: Uses advanced CSI features, reduced memory buffers, no PSRAM
+
+**Note:** By copying the target-specific file to `sdkconfig.defaults`, you ensure that all critical configurations (like `CONFIG_ESP_WIFI_CSI_ENABLED` and `CONFIG_SPIRAM`) are properly applied during the build process. The target will be automatically detected from the configuration file.
 
 In menuconfig:
 - Go to **ESPectre Configuration**
