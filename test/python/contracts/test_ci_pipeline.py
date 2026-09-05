@@ -71,26 +71,26 @@ def test_ci_chip_matrices_follow_production_registries() -> None:
     cpp_job = _workflow_job(source, "test-cpp")
     assert "./test/cpp/run_coverage.sh --ci" in cpp_job
     assert "--kind cpp-runtime" in cpp_job
-    assert "--report test/cpp/coverage-summary.json" in cpp_job
-    assert "--output coverage-cpp-runtime.json" in cpp_job
+    assert "--report .cache/reports/coverage/cpp/coverage-summary.json" in cpp_job
+    assert "--output .cache/reports/coverage/coverage-cpp-runtime.json" in cpp_job
     assert "name: cpp-coverage-badge" in cpp_job
     assert (
-        "if: always() && hashFiles('test/cpp/coverage-summary.json') != ''"
+        "if: always() && hashFiles('.cache/reports/coverage/cpp/coverage-summary.json') != ''"
         in cpp_job
     )
-    assert "if: always() && hashFiles('coverage-cpp-runtime.json') != ''" in cpp_job
+    assert "if: always() && hashFiles('.cache/reports/coverage/coverage-cpp-runtime.json') != ''" in cpp_job
 
     python_job = _workflow_job(source, "test-python")
     assert "--cov-branch" in python_job
-    assert "--cov-report=json:python-coverage.json" in python_job
+    assert "--cov-report=json:.cache/reports/coverage/python-coverage.json" in python_job
     assert "--cov-report=xml" not in python_job
-    assert "python test/python/check_coverage.py python-coverage.json" in python_job
+    assert "python test/python/check_coverage.py .cache/reports/coverage/python-coverage.json" in python_job
     assert "--kind python" in python_job
-    assert "--report python-coverage.json" in python_job
-    assert "--output coverage-python.json" in python_job
+    assert "--report .cache/reports/coverage/python-coverage.json" in python_job
+    assert "--output .cache/reports/coverage/coverage-python.json" in python_job
     assert "name: python-coverage-badge" in python_job
-    assert "if: always() && hashFiles('python-coverage.json') != ''" in python_job
-    assert "if: always() && hashFiles('coverage-python.json') != ''" in python_job
+    assert "if: always() && hashFiles('.cache/reports/coverage/python-coverage.json') != ''" in python_job
+    assert "if: always() && hashFiles('.cache/reports/coverage/coverage-python.json') != ''" in python_job
 
 
 def test_python_coverage_gate_has_fixed_thresholds() -> None:
@@ -165,11 +165,11 @@ def test_web_coverage_gate_uses_canonical_thresholds() -> None:
         assert f'--test-coverage-{metric}=${{{variable}}}' in runner
     assert "docs/web/assets/js/espectre-direct.js" in runner
     assert "--kind web" in build_site
-    assert "--report web-coverage.log" in build_site
-    assert "--output coverage-web.json" in build_site
+    assert "--report .cache/reports/coverage/web-coverage.log" in build_site
+    assert "--output .cache/reports/coverage/coverage-web.json" in build_site
     assert "name: web-coverage-badge" in build_site
-    assert "if: always() && hashFiles('web-coverage.log') != ''" in build_site
-    assert "if: always() && hashFiles('coverage-web.json') != ''" in build_site
+    assert "if: always() && hashFiles('.cache/reports/coverage/web-coverage.log') != ''" in build_site
+    assert "if: always() && hashFiles('.cache/reports/coverage/coverage-web.json') != ''" in build_site
 
 
 def test_snapshot_publishes_stable_coverage_badge_endpoints() -> None:

@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 BUILD_DIR="build-container-${MATTER_TARGET}"
 DOCKER_IMAGE="${MATTER_DOCKER_IMAGE:-espressif/idf:v5.5.5@sha256:a9231d0697ab8f7517cc072e93b7c83e04907bfbfba80b6440d7dbbf90665cf2}"
-MATTER_HOME="${REPO_ROOT}/.github/.cache/matter-home"
+MATTER_HOME="${REPO_ROOT}/.cache/build/matter-home"
 MATTER_ROOT_MANAGED_COMPONENTS="${MATTER_HOME}/root_managed_components"
 MATTER_CCACHE="${MATTER_HOME}/ccache-${MATTER_TARGET}"
 OUTPUT_DIR="$(dirname "${MATTER_OUTPUT}")"
@@ -20,10 +20,11 @@ mkdir -p "${MATTER_HOME}" "${MATTER_ROOT_MANAGED_COMPONENTS}" "${MATTER_CCACHE}"
 
 docker run --rm \
   --user "$(id -u):$(id -g)" \
-  -e HOME="/work/.github/.cache/matter-home" \
+  -e HOME="/work/.cache/build/matter-home" \
+  -e ESPECTRE_AUDIT_POLICY="${ESPECTRE_AUDIT_POLICY:-report}" \
   -e ESPECTRE_GIT_VERSION="${ESPECTRE_GIT_VERSION}" \
   -e IDF_CCACHE_ENABLE=1 \
-  -e CCACHE_DIR="/work/.github/.cache/matter-home/ccache-${MATTER_TARGET}" \
+  -e CCACHE_DIR="/work/.cache/build/matter-home/ccache-${MATTER_TARGET}" \
   -e CCACHE_MAXSIZE=750M \
   -e SDKCONFIG_DEFAULTS="${MATTER_SDKCONFIG_DEFAULTS}" \
   -e MATTER_OUTPUT="${MATTER_OUTPUT_IN_WORK}" \
@@ -70,4 +71,8 @@ docker run --rm \
       --project-description /work/src/cpp/frontend/matter/app/${BUILD_DIR}/project_description.json \
       --firmware \"\${MATTER_OUTPUT}\" \
       --output-dir \"\$(dirname \"\${MATTER_OUTPUT}\")\"
+    python /work/.github/scripts/audit_firmware_dependencies.py \
+      --frontend matter \
+      --sbom \"\${MATTER_OUTPUT%.bin}-sbom.spdx.json\" \
+      --output-dir /work/.cache/reports/firmware/matter
   "

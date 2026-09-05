@@ -126,14 +126,14 @@ _DEFAULT_PROGRESS_INTERVAL_S = 10.0
 def npz_cache_dir() -> Path:
     """Return the NPZ cache directory.
 
-    Defaults to the workspace-local `.npz_cache`. `ESPECTRE_NPZ_CACHE_DIR`
+    Defaults to the workspace-local `.cache/npz`. `ESPECTRE_NPZ_CACHE_DIR`
     redirects it, which keeps tests off the working cache and allows placing
     artifacts on another volume.
     """
     override = os.environ.get(NPZ_CACHE_DIR_ENV)
     if override:
         return Path(override).expanduser()
-    return repo_root() / ".npz_cache"
+    return repo_root() / ".cache" / "npz"
 
 
 def npz_cache_progress_enabled() -> bool:

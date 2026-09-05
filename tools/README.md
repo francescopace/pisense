@@ -96,7 +96,7 @@ Use an explicit seed and the same corpus, roles, preprocessing, features, and au
 
 ## Generated Performance Report
 
-`generate_performance_report.py` publishes Lightweight and High Accuracy replay tables only for the combined `selection + holdout` corpus, executes the current production C++ resource microbenchmark, and runs the host-side C++/Python parity checks before writing the report. Training-role recordings remain covered by the validation suites but are neither replayed nor summarized by the report generator. Detector replay summaries, augmented rows, and training matrices use the shared `.npz_cache`; a warm generation reuses them instead of replaying the corpus. Its augmentation diagnostic applies the production two-seed packet recipe to the same reserved pairs and compares Lightweight and High Accuracy on matching alternating replay positions; it never reads augmented training rows.
+`generate_performance_report.py` publishes Lightweight and High Accuracy replay tables only for the combined `selection + holdout` corpus, executes the current production C++ resource microbenchmark, and runs the host-side C++/Python parity checks before writing the report. Training-role recordings remain covered by the validation suites but are neither replayed nor summarized by the report generator. Detector replay summaries, augmented rows, and training matrices use the shared `.cache/npz`; a warm generation reuses them instead of replaying the corpus. Its augmentation diagnostic applies the production two-seed packet recipe to the same reserved pairs and compares Lightweight and High Accuracy on matching alternating replay positions; it never reads augmented training rows.
 
 ```bash
 python tools/generate_performance_report.py

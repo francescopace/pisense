@@ -14,7 +14,7 @@ NATIVE_OTA_OUTPUT_IN_WORK=""
 NATIVE_SDKCONFIG_DEFAULTS="${NATIVE_SDKCONFIG_DEFAULTS:-}"
 NATIVE_OTA_CHANNEL="${NATIVE_OTA_CHANNEL:-release}"
 ESPECTRE_GIT_VERSION="${ESPECTRE_GIT_VERSION:-$(python3 "${REPO_ROOT}/.github/scripts/detect_git_version.py")}"
-NATIVE_HOME="${REPO_ROOT}/.github/.cache/native-home"
+NATIVE_HOME="${REPO_ROOT}/.cache/build/native-home"
 NATIVE_ROOT_MANAGED_COMPONENTS="${NATIVE_HOME}/root_managed_components"
 
 if [ -n "${NATIVE_OTA_OUTPUT:-}" ]; then
@@ -25,7 +25,8 @@ mkdir -p "${NATIVE_HOME}" "${NATIVE_ROOT_MANAGED_COMPONENTS}" "${OUTPUT_DIR}"
 
 docker run --rm \
   --user "$(id -u):$(id -g)" \
-  -e HOME="/work/.github/.cache/native-home" \
+  -e HOME="/work/.cache/build/native-home" \
+  -e ESPECTRE_AUDIT_POLICY="${ESPECTRE_AUDIT_POLICY:-report}" \
   -e ESPECTRE_GIT_VERSION="${ESPECTRE_GIT_VERSION}" \
   -e SDKCONFIG_DEFAULTS="${NATIVE_SDKCONFIG_DEFAULTS}" \
   -e NATIVE_OTA_CHANNEL="${NATIVE_OTA_CHANNEL}" \
@@ -85,4 +86,8 @@ docker run --rm \
         --firmware \"\${NATIVE_OTA_OUTPUT}\" \
         --output-dir \"\$(dirname \"\${NATIVE_OTA_OUTPUT}\")\"
     fi
+    python /work/.github/scripts/audit_firmware_dependencies.py \
+      --frontend native \
+      --sbom \"\${NATIVE_OUTPUT%.bin}-sbom.spdx.json\" \
+      --output-dir /work/.cache/reports/firmware/native
   "

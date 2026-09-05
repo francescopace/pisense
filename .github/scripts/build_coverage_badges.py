@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 from pathlib import Path
 
@@ -99,6 +100,18 @@ def main() -> int:
         + "\n",
         encoding="utf-8",
     )
+    if summary_path := os.environ.get("GITHUB_STEP_SUMMARY"):
+        metrics = _load_metrics(args.kind, args.report)
+        minimums = _load_minimums(args.kind, args.thresholds)
+        with Path(summary_path).open("a", encoding="utf-8") as summary:
+            summary.write(f"### {BADGE_LABELS[args.kind]}\n\n")
+            summary.write("| Metric | Coverage | Minimum | Result |\n| --- | ---: | ---: | --- |\n")
+            for metric in METRIC_ORDER:
+                if metric in metrics:
+                    passed = metrics[metric] + 1e-9 >= minimums[metric]
+                    summary.write(f"| {metric} | {metrics[metric]:.2f}% | {minimums[metric]:.2f}% | "
+                                  f"{'Pass' if passed else 'Below threshold'} |\n")
+            summary.write("\nUses the existing coverage scope and thresholds; no branch comparison.\n")
     print(args.output)
     return 0
 

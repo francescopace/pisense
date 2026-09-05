@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  ESPECTRE_AUDIT_POLICY: release
+
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -107,31 +110,50 @@ jobs:
       
       - name: Rename firmware files
         run: |
-          mkdir -p output
+          mkdir -p .cache/firmware
           VERSION="${GITHUB_REF_NAME}"
           CHIP=$(echo "${{ matrix.chip }}" | tr '[:upper:]' '[:lower:]' | tr -d '-')
-          find src/cpp/frontend/esphome/examples/.esphome/build -name "firmware.factory.bin" -exec cp {} output/ \;
-          find src/cpp/frontend/esphome/examples/.esphome/build -name "firmware.ota.bin" -exec cp {} output/ \;
-          mv "output/firmware.factory.bin" "output/espectre-esphome-${VERSION}-${CHIP}.bin"
-          mv "output/firmware.ota.bin" "output/espectre-esphome-${VERSION}-${CHIP}-ota.bin"
+          find src/cpp/frontend/esphome/examples/.esphome/build -name "firmware.factory.bin" -exec cp {} .cache/firmware/ \;
+          find src/cpp/frontend/esphome/examples/.esphome/build -name "firmware.ota.bin" -exec cp {} .cache/firmware/ \;
+          mv ".cache/firmware/firmware.factory.bin" ".cache/firmware/espectre-esphome-${VERSION}-${CHIP}.bin"
+          mv ".cache/firmware/firmware.ota.bin" ".cache/firmware/espectre-esphome-${VERSION}-${CHIP}-ota.bin"
 
       - name: Build ESPHome compliance artifacts
+        env:
+          ESPECTRE_GIT_VERSION: ${{ github.ref_name }}
         run: |
           PROJECT_DESCRIPTION="$(find src/cpp/frontend/esphome/examples/.esphome/build -path '*/build/project_description.json' -print -quit)"
           test -n "${PROJECT_DESCRIPTION}"
-          for FIRMWARE in output/espectre-esphome-*.bin; do
+          for FIRMWARE in .cache/firmware/espectre-esphome-*.bin; do
             python .github/scripts/build_firmware_compliance.py \
               --frontend esphome \
               --project-description "${PROJECT_DESCRIPTION}" \
               --firmware "${FIRMWARE}" \
-              --output-dir output
+              --output-dir .cache/firmware
+          done
+          # Factory and OTA images share the same linked dependency graph.
+          for FIRMWARE in .cache/firmware/espectre-esphome-*.bin; do
+            case "${FIRMWARE}" in *-ota.bin) continue ;; esac
+            python .github/scripts/audit_firmware_dependencies.py \
+              --frontend esphome --sbom "${FIRMWARE%.bin}-sbom.spdx.json" \
+              --output-dir .cache/reports/firmware/esphome
           done
       
+      - name: Summarize firmware audit
+        if: always()
+        run: |
+          if [ -f .cache/reports/firmware/esphome/summary.md ]; then
+            cat .cache/reports/firmware/esphome/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Firmware dependency audit did not complete.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Upload firmware artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          include-hidden-files: true
           name: firmware-${{ matrix.chip }}
-          path: output/espectre-esphome-${{ github.ref_name }}-*
+          path: .cache/firmware/espectre-esphome-${{ github.ref_name }}-*
           retention-days: 7
 
   build-matter:
@@ -165,7 +187,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
-            .github/.cache/matter-home
+            .cache/build/matter-home
             src/cpp/frontend/matter/app/managed_components
           key: matter-${{ runner.os }}-idf-v5.5-build-v3-${{ matrix.target }}-${{ hashFiles('requirements.txt', 'src/cpp/frontend/matter/app/main/idf_component.yml', 'src/cpp/frontend/matter/app/sdkconfig.defaults*') }}
           restore-keys: |
@@ -174,18 +196,28 @@ jobs:
 
       - name: Build Matter firmware
         run: |
-          mkdir -p output
+          mkdir -p .cache/firmware
           .github/scripts/build_matter_firmware.sh
         env:
           MATTER_TARGET: ${{ matrix.target }}
-          MATTER_OUTPUT: ${{ github.workspace }}/output/espectre-matter-${{ github.ref_name }}-${{ matrix.target }}.bin
+          MATTER_OUTPUT: ${{ github.workspace }}/.cache/firmware/espectre-matter-${{ github.ref_name }}-${{ matrix.target }}.bin
           MATTER_SDKCONFIG_DEFAULTS: ${{ matrix.target == 'esp32' && 'sdkconfig.defaults;sdkconfig.defaults.esp32' || '' }}
+
+      - name: Summarize firmware audit
+        if: always()
+        run: |
+          if [ -f .cache/reports/firmware/matter/summary.md ]; then
+            cat .cache/reports/firmware/matter/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Firmware dependency audit did not complete.' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload Matter firmware artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          include-hidden-files: true
           name: firmware-matter-${{ matrix.chip }}
-          path: output/espectre-matter-*
+          path: .cache/firmware/espectre-matter-*
           retention-days: 7
 
   build-native:
@@ -219,26 +251,36 @@ jobs:
       - name: Cache native toolchain
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
-          path: .github/.cache/native-home
+          path: .cache/build/native-home
           key: native-${{ runner.os }}-idf-v5.5-deps-v2-${{ hashFiles('requirements.txt') }}
           restore-keys: |
             native-${{ runner.os }}-idf-v5.5-deps-v2-
 
       - name: Build native firmware
         run: |
-          mkdir -p output
+          mkdir -p .cache/firmware
           bash .github/scripts/build_native_firmware.sh
         env:
           NATIVE_TARGET: ${{ matrix.target }}
-          NATIVE_OUTPUT: ${{ github.workspace }}/output/espectre-native-${{ github.ref_name }}-${{ matrix.target }}.bin
-          NATIVE_OTA_OUTPUT: ${{ github.workspace }}/output/espectre-native-${{ github.ref_name }}-${{ matrix.target }}-ota.bin
+          NATIVE_OUTPUT: ${{ github.workspace }}/.cache/firmware/espectre-native-${{ github.ref_name }}-${{ matrix.target }}.bin
+          NATIVE_OTA_OUTPUT: ${{ github.workspace }}/.cache/firmware/espectre-native-${{ github.ref_name }}-${{ matrix.target }}-ota.bin
           NATIVE_SDKCONFIG_DEFAULTS: ${{ matrix.target == 'esp32' && 'sdkconfig.defaults;sdkconfig.defaults.esp32' || '' }}
+
+      - name: Summarize firmware audit
+        if: always()
+        run: |
+          if [ -f .cache/reports/firmware/native/summary.md ]; then
+            cat .cache/reports/firmware/native/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Firmware dependency audit did not complete.' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload native firmware artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          include-hidden-files: true
           name: firmware-native-${{ matrix.chip }}
-          path: output/espectre-native-*
+          path: .cache/firmware/espectre-native-*
           retention-days: 7
 
   build-sdk:
@@ -257,22 +299,23 @@ jobs:
 
       - name: Build SDK package
         run: |
-          mkdir -p output
+          mkdir -p .cache/sdk
           python .github/scripts/build_sdk_package.py \
             --channel release \
             --version "${GITHUB_REF_NAME}" \
             --release-tag "${GITHUB_REF_NAME}" \
-            --output-dir output \
+            --output-dir .cache/sdk \
             --commit "${GITHUB_SHA}"
 
       - name: Upload SDK artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          include-hidden-files: true
           name: sdk-bundle
           path: |
-            output/espectre-sdk-*.tar.gz
-            output/espectre-sdk-*.zip
-            output/sdk-manifest-*.json
+            .cache/sdk/espectre-sdk-*.tar.gz
+            .cache/sdk/espectre-sdk-*.zip
+            .cache/sdk/sdk-manifest-*.json
           retention-days: 7
 
   release:

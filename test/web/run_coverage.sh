@@ -26,6 +26,7 @@ if [[ -z "${WEB_COVERAGE_LOG:-}" ]]; then
   exec "${coverage_command[@]}"
 fi
 
+mkdir -p "$(dirname "$WEB_COVERAGE_LOG")"
 set +e
 "${coverage_command[@]}" 2>&1 | tee "$WEB_COVERAGE_LOG"
 coverage_status=${PIPESTATUS[0]}

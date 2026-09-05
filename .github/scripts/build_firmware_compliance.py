@@ -9,10 +9,13 @@ import argparse
 import hashlib
 import importlib.metadata
 import json
+import os
 import re
+import subprocess
+import sys
+import tempfile
 import zipfile
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -30,11 +33,6 @@ class Package:
     license_expression: str
     roots: set[Path] = field(default_factory=set)
     component_names: set[str] = field(default_factory=set)
-
-    @property
-    def spdx_id(self) -> str:
-        normalized = re.sub(r"[^A-Za-z0-9.-]+", "-", self.name).strip("-")
-        return f"SPDXRef-Package-{normalized}"
 
 
 def parse_args() -> argparse.Namespace:
@@ -64,12 +62,21 @@ def infer_license(root: Path, fallback: str = "NOASSERTION") -> str:
     if not candidates:
         return fallback
     text = candidates[0].read_text(encoding="utf-8", errors="ignore")[:4000].lower()
+    gnu_license = re.search(r"gnu (affero |lesser )?general public license\s+version ([23](?:\.1)?)", text)
+    if gnu_license:
+        family = {None: "GPL", "affero ": "AGPL", "lesser ": "LGPL"}[gnu_license.group(1)]
+        version = gnu_license.group(2)
+        if "." not in version:
+            version += ".0"
+        return f"{family}-{version}-only"
     if "apache license" in text and "version 2.0" in text:
         return "Apache-2.0"
     if "mit license" in text or "permission is hereby granted, free of charge" in text:
         return "MIT"
     if "bsd 2-clause" in text:
         return "BSD-2-Clause"
+    if "all advertising materials mentioning features or use" in text:
+        return "BSD-4-Clause"
     if "bsd 3-clause" in text or "neither the name" in text:
         return "BSD-3-Clause"
     return fallback
@@ -88,7 +95,7 @@ def managed_component_root(path: Path) -> Path | None:
 def collect_packages(description: dict, frontend: str) -> dict[str, Package]:
     project_path = Path(description["project_path"]).resolve()
     idf_path = Path(description["idf_path"]).resolve()
-    project_version = description.get("project_version", "NOASSERTION")
+    project_version = os.environ.get("ESPECTRE_GIT_VERSION", description.get("project_version", "NOASSERTION"))
     if project_version == "1":
         project_version = "NOASSERTION"
     packages: dict[str, Package] = {
@@ -238,82 +245,106 @@ def collect_license_files(packages: dict[str, Package], frontend: str) -> list[t
     return sorted(collected.items())
 
 
-def build_spdx(description: dict, frontend: str, firmware: Path, packages: dict[str, Package]) -> dict:
-    firmware_sha256 = hashlib.sha256(firmware.read_bytes()).hexdigest()
-    document_name = f"{firmware.name} SBOM"
-    document_namespace = f"https://espectre.dev/sbom/{firmware.name}/{firmware_sha256}"
-    firmware_spdx_id = "SPDXRef-Package-Firmware"
-    package_entries = [
-        {
-            "SPDXID": firmware_spdx_id,
-            "name": firmware.name,
-            "versionInfo": packages["ESPectre"].version,
-            "downloadLocation": "NOASSERTION",
-            "filesAnalyzed": False,
-            "checksums": [{"algorithm": "SHA256", "checksumValue": firmware_sha256}],
-            "licenseConcluded": "NOASSERTION",
-            "licenseDeclared": "NOASSERTION",
-            "copyrightText": "NOASSERTION",
-            "comment": f"ESPectre {frontend} firmware image for {description.get('target', 'unknown')}",
-        }
-    ]
-    relationships = [
-        {
-            "spdxElementId": "SPDXRef-DOCUMENT",
-            "relationshipType": "DESCRIBES",
-            "relatedSpdxElement": firmware_spdx_id,
-        }
-    ]
-    for package in sorted(packages.values(), key=lambda entry: entry.name.casefold()):
-        package_entries.append(
-            {
-                "SPDXID": package.spdx_id,
-                "name": package.name,
-                "versionInfo": package.version,
-                "downloadLocation": "NOASSERTION",
-                "filesAnalyzed": False,
-                "licenseConcluded": "NOASSERTION" if package.name == "ESP-IDF" else package.license_expression,
-                "licenseDeclared": package.license_expression,
-                "copyrightText": "NOASSERTION",
-                "comment": "Build components: " + ", ".join(sorted(package.component_names)),
-            }
+def generate_sbom(project_description: Path) -> dict:
+    """Use the Espressif build graph, including source license tags and CVE metadata."""
+    with tempfile.TemporaryDirectory(prefix="espectre-sbom-") as directory:
+        output = Path(directory) / "sbom.json"
+        result = subprocess.run(
+            [sys.executable, "-m", "esp_idf_sbom", "--no-progress", "create",
+             "--format", "spdx-json@2.2", "--file-tags", "--no-sync-excluded-cves",
+             "--output-file", str(output), str(project_description)],
+            capture_output=True, text=True, timeout=600,
         )
-        relationships.append(
-            {
-                "spdxElementId": firmware_spdx_id,
-                "relationshipType": "DEPENDS_ON",
-                "relatedSpdxElement": package.spdx_id,
-            }
-        )
-    return {
-        "spdxVersion": "SPDX-2.3",
-        "dataLicense": "CC0-1.0",
-        "SPDXID": "SPDXRef-DOCUMENT",
-        "name": document_name,
-        "documentNamespace": document_namespace,
-        "creationInfo": {
-            "created": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-            "creators": ["Tool: ESPectre build_firmware_compliance.py"],
-        },
-        "documentDescribes": [firmware_spdx_id],
-        "packages": package_entries,
-        "relationships": relationships,
-        "hasExtractedLicensingInfos": [
-            {
-                "licenseId": "LicenseRef-ESPectre-Commercial",
-                "name": "ESPectre commercial license",
-                "extractedText": "Separate written commercial terms are available from the ESPectre maintainer and are not included in this artifact.",
-            }
-        ],
-        "annotations": [
-            {
-                "annotationDate": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-                "annotationType": "OTHER",
-                "annotator": "Tool: ESPectre build_firmware_compliance.py",
-                "comment": f"Firmware SHA-256: {firmware_sha256}; frontend: {frontend}; target: {description.get('target', 'unknown')}",
-            }
-        ],
+        if result.returncode:
+            raise RuntimeError("ESP-IDF SBOM generation failed:\n" + result.stderr[-8000:])
+        if result.stderr.strip():
+            print(result.stderr.strip(), file=sys.stderr)
+        return json.loads(output.read_text(encoding="utf-8"))
+
+
+def enrich_sbom(sbom: dict, description: dict, frontend: str, firmware: Path) -> dict:
+    """Attach the distributed image without replacing upstream packages or relationships."""
+    from license_expression import Licensing
+
+    own_license = "GPL-3.0-only OR LicenseRef-ESPectre-Commercial"
+    project_version = os.environ.get("ESPECTRE_GIT_VERSION", description.get("project_version", "NOASSERTION"))
+    licensing = Licensing()
+    components = {
+        "SPDXRef-COMPONENT-" + re.sub(r"[^A-Za-z0-9.-]", "-", name): Path(info["dir"]).resolve()
+        for name, info in description["build_component_info"].items() if info.get("dir")
     }
+    project_ids = {
+        relation["relatedSpdxElement"] for relation in sbom["relationships"]
+        if relation["relationshipType"] == "DESCRIBES"
+    }
+    if len(project_ids) != 1:
+        raise ValueError("Expected one project package in the ESP-IDF SBOM")
+    for package in sbom["packages"]:
+        package_id = package["SPDXID"]
+        root = components.get(package_id)
+        # Only our owned source trees receive the separate commercial option.
+        owned = root is not None and any(
+            root.is_relative_to(REPO_ROOT / "src" / "cpp" / subtree)
+            for subtree in ("core", "runtime", "frontend/native/app", "frontend/native/espectre",
+                            "frontend/matter/app", "frontend/matter/espectre")
+        ) and "managed_components" not in root.parts and "third_party" not in root.parts
+        if owned:
+            package["licenseDeclared"] = own_license
+            package["versionInfo"] = project_version
+            expression = package.get("licenseConcluded", "NOASSERTION")
+            if expression == "NOASSERTION":
+                package["licenseConcluded"] = own_license
+            else:
+                package["licenseConcluded"] = str(licensing.parse(expression).subs({
+                    licensing.parse("GPL-3.0-only"): licensing.parse(own_license),
+                }))
+        if frontend == "esphome" and package_id in {"SPDXRef-COMPONENT-src", "SPDXRef-COMPONENT-espectre"}:
+            package["licenseDeclared"] = "GPL-3.0-only"
+            if package_id == "SPDXRef-COMPONENT-src":
+                package["name"] = "ESPHome C++ runtime"
+                package["versionInfo"] = importlib.metadata.version("esphome")
+            else:
+                package["versionInfo"] = project_version
+        if root is not None and package.get("licenseDeclared") == "NOASSERTION":
+            package["licenseDeclared"] = infer_license(root)
+        if package_id == "SPDXRef-FRAMEWORK-esp-idf":
+            package["licenseDeclared"] = infer_license(Path(description["idf_path"]))
+        if package_id in project_ids:
+            # Espressif's project conclusion aggregates source headers; the component
+            # entries retain those findings, including our separate commercial terms.
+            package["licenseDeclared"] = "GPL-3.0-only" if frontend == "esphome" else own_license
+            package["licenseConcluded"] = "NOASSERTION"
+
+    firmware_sha256 = hashlib.sha256(firmware.read_bytes()).hexdigest()
+    firmware_id = "SPDXRef-Package-Firmware"
+    sbom["name"] = f"{firmware.name} SBOM"
+    sbom["documentNamespace"] = f"https://espectre.dev/sbom/{firmware.name}/{firmware_sha256}"
+    sbom["creationInfo"]["creators"].append("Tool: ESPectre build_firmware_compliance.py")
+    sbom["documentDescribes"] = [firmware_id]
+    sbom["packages"].append({
+        "SPDXID": firmware_id,
+        "name": firmware.name,
+        "versionInfo": project_version,
+        "downloadLocation": "NOASSERTION",
+        "filesAnalyzed": False,
+        "checksums": [{"algorithm": "SHA256", "checksumValue": firmware_sha256}],
+        "licenseDeclared": "GPL-3.0-only" if frontend == "esphome" else own_license,
+        "licenseConcluded": "NOASSERTION",
+        "copyrightText": "NOASSERTION",
+        "comment": f"ESPectre {frontend} firmware image for {description.get('target', 'unknown')}",
+    })
+    sbom["relationships"] = [
+        relation for relation in sbom["relationships"] if relation["relationshipType"] != "DESCRIBES"
+    ] + [{"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": firmware_id}] + [
+        {"spdxElementId": firmware_id, "relationshipType": "DEPENDS_ON", "relatedSpdxElement": project_id}
+        for project_id in sorted(project_ids)
+    ]
+    sbom.setdefault("hasExtractedLicensingInfos", []).append({
+        "licenseId": "LicenseRef-ESPectre-Commercial",
+        "name": "ESPectre commercial license",
+        "extractedText": "Separate written commercial terms are available from the ESPectre maintainer and are not included in this artifact.",
+    })
+    return sbom
 
 
 def write_notice(path: Path, firmware: Path, frontend: str, description: dict, packages: dict[str, Package]) -> None:
@@ -354,7 +385,7 @@ def build_compliance(args: argparse.Namespace) -> tuple[Path, Path, Path]:
     notice_path = output_dir / f"{stem}-THIRD_PARTY_NOTICES.txt"
     licenses_path = output_dir / f"{stem}-third-party-licenses.zip"
 
-    sbom = build_spdx(description, args.frontend, firmware, packages)
+    sbom = enrich_sbom(generate_sbom(project_description), description, args.frontend, firmware)
     sbom_path.write_text(json.dumps(sbom, indent=2) + "\n", encoding="utf-8")
     write_notice(notice_path, firmware, args.frontend, description, packages)
     with zipfile.ZipFile(licenses_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:

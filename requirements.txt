@@ -29,5 +29,9 @@ gcovr==8.6              # C++ coverage reports
 Jinja2==3.1.6           # m.css SDK API fragment templates
 Pygments==2.21.0        # m.css SDK API syntax highlighting
 
+# Firmware dependency inventory and compliance checks
+esp-idf-sbom==1.3.1     # ESP-IDF SBOM generation and NVD checks
+license-expression==30.4.4  # SPDX license policy evaluation
+
 # Local analysis extras
 matplotlib==3.11.1      # Plotting and visualization

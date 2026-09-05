@@ -143,7 +143,7 @@ def build_toolchain_docker_command(
             f"ESP-IDF work directory is outside the repository: {resolved_workdir}"
         ) from exc
 
-    container_home_relative = Path(".github") / ".cache" / f"{frontend}-home"
+    container_home_relative = Path(".cache") / "build" / f"{frontend}-home"
     container_home = resolved_root / container_home_relative
     root_managed_components = container_home / "root_managed_components"
     ccache_dir = container_home / "ccache"

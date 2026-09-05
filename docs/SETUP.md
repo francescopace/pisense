@@ -103,6 +103,12 @@ ccache --version
 
 Build cleanup, chip-matched flash selection, and namespace-specific flags are documented in [CLI.md](CLI.md#frontend-workflow-commands).
 
+### Generated Files and Caches
+
+Repository workflows keep generated files under `.cache/`: `firmware/` and `sdk/` contain distribution files, `reports/` contains audit and coverage reports, `build/` contains Docker toolchain homes, and `npz/` and `pytest/` contain reusable caches. The virtual environment remains in `.venv/`, and ESP-IDF and ESPHome retain their frontend-specific build directories. Public artifact filenames and URLs are unchanged.
+
+Python bytecode follows the interpreter defaults or the user's `PYTHONPYCACHEPREFIX` setting; repository scripts do not set a bytecode cache location. NPZ tooling continues to support `ESPECTRE_NPZ_CACHE_DIR` for a cache on another volume. Moving an existing `.npz_cache/` to `.cache/npz/` preserves its contents; avoid moving caches while a build, test, or training process is using them.
+
 ## Local CLI Workflows
 
 Use the repository CLI from the repository root for local build, flash, monitor, and host-tool tasks.

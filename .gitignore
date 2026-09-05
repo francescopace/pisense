@@ -18,12 +18,9 @@ test/cpp/coverage-summary.json
 test/.coverage.tmp.lcov
 htmlcov/
 
-# Pytest
-.pytest_cache/
+# Local caches, generated reports, and distribution files
+/.cache/
 .bench_*/
-
-# Shared NPZ cache
-.npz_cache/
 
 # Local external datasets that cannot be redistributed
 data/untracked/
@@ -34,14 +31,10 @@ data/auto_generated/mlp_seed_search.json
 data/auto_generated/mlp_architecture_experiment.json
 data/auto_generated/mlp_fp_weight_experiment.json
 
-# Ruff cache
-.ruff_cache/
-
 # Python
 __pycache__/
 *.pyc
 *.pyo
-.cache
 .matplotlib/
 src/python/micro_espectre/config_local.py
 

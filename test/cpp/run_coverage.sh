@@ -15,9 +15,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BUILD_DIR="$SCRIPT_DIR/build-coverage"
-LCOV_OUTPUT="$SCRIPT_DIR/coverage.lcov"
-TMP_LCOV="$SCRIPT_DIR/.coverage.tmp.lcov"
-SUMMARY_OUTPUT="$SCRIPT_DIR/coverage-summary.json"
+REPORT_DIR="$WORKSPACE_ROOT/.cache/reports/coverage/cpp"
+LCOV_OUTPUT="$REPORT_DIR/coverage.lcov"
+TMP_LCOV="$REPORT_DIR/.coverage.tmp.lcov"
+SUMMARY_OUTPUT="$REPORT_DIR/coverage-summary.json"
 THRESHOLDS_FILE="$SCRIPT_DIR/coverage-thresholds.json"
 
 CI_MODE=false
@@ -376,6 +377,7 @@ echo "Compiler: $COMPILER"
 echo "Parallel jobs: $PARALLEL_JOBS"
 
 rm -rf "$BUILD_DIR"
+mkdir -p "$REPORT_DIR"
 rm -f "$LCOV_OUTPUT" "$TMP_LCOV" "$SUMMARY_OUTPUT"
 
 cmake -S "$SCRIPT_DIR" -B "$BUILD_DIR" \

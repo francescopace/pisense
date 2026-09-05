@@ -33,6 +33,12 @@ def _write_source_npz(path, *, values):
     np.savez(path, csi_data=np.asarray([values], dtype=np.int8))
 
 
+def test_default_cache_root_is_inside_workspace_cache(tmp_path, monkeypatch):
+    monkeypatch.delenv(npz_cache.NPZ_CACHE_DIR_ENV, raising=False)
+    monkeypatch.setattr(npz_cache, "repo_root", lambda: tmp_path)
+    assert npz_cache.npz_cache_dir() == tmp_path / ".cache" / "npz"
+
+
 def test_cache_root_follows_the_environment_override(isolated_cache_root):
     assert npz_cache.npz_cache_dir() == isolated_cache_root
 

@@ -1,4 +1,5 @@
 [run]
+data_file = .cache/reports/coverage/.coverage
 source_dirs =
     src/python/micro_espectre
     src/python/espectre_cli

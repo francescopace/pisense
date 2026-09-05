@@ -40,23 +40,24 @@ jobs:
       - name: Build and verify Pages tree
         uses: ./.github/actions/build-pages
         env:
-          WEB_COVERAGE_LOG: web-coverage.log
+          WEB_COVERAGE_LOG: .cache/reports/coverage/web-coverage.log
 
       - name: Build web coverage badge
-        if: always() && hashFiles('web-coverage.log') != ''
+        if: always() && hashFiles('.cache/reports/coverage/web-coverage.log') != ''
         run: |
           python .github/scripts/build_coverage_badges.py \
             --kind web \
-            --report web-coverage.log \
+            --report .cache/reports/coverage/web-coverage.log \
             --thresholds test/web/coverage-thresholds.json \
-            --output coverage-web.json
+            --output .cache/reports/coverage/coverage-web.json
 
       - name: Upload web coverage badge
-        if: always() && hashFiles('coverage-web.json') != ''
+        if: always() && hashFiles('.cache/reports/coverage/coverage-web.json') != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          include-hidden-files: true
           name: web-coverage-badge
-          path: coverage-web.json
+          path: .cache/reports/coverage/coverage-web.json
           retention-days: 14
 
   test-cpp:
@@ -85,20 +86,21 @@ jobs:
         run: ./test/cpp/run_coverage.sh --ci
 
       - name: Build C++ coverage badge
-        if: always() && hashFiles('test/cpp/coverage-summary.json') != ''
+        if: always() && hashFiles('.cache/reports/coverage/cpp/coverage-summary.json') != ''
         run: |
           python .github/scripts/build_coverage_badges.py \
             --kind cpp-runtime \
-            --report test/cpp/coverage-summary.json \
+            --report .cache/reports/coverage/cpp/coverage-summary.json \
             --thresholds test/cpp/coverage-thresholds.json \
-            --output coverage-cpp-runtime.json
+            --output .cache/reports/coverage/coverage-cpp-runtime.json
 
       - name: Upload C++ coverage badge
-        if: always() && hashFiles('coverage-cpp-runtime.json') != ''
+        if: always() && hashFiles('.cache/reports/coverage/coverage-cpp-runtime.json') != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          include-hidden-files: true
           name: cpp-coverage-badge
-          path: coverage-cpp-runtime.json
+          path: .cache/reports/coverage/coverage-cpp-runtime.json
           retention-days: 14
 
   test-python:
@@ -126,36 +128,41 @@ jobs:
       - name: Restore shared NPZ cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
-          path: .npz_cache
-          key: ${{ format('npz-cache-v1-{0}-{1}', runner.os, hashFiles('data/dataset_info.json', 'src/python/micro_espectre/runtime_policy.py', 'tools/lib/csi_io.py', 'tools/lib/dataset_metadata.py', 'tools/lib/npz_cache.py', 'tools/lib/performance_report.py', 'tools/train_ml_model.py', 'tools/validate_dataset_quality.py', 'test/python/performance/test_packet_rate_adaptation_regression.py')) }}
+          path: .cache/npz
+          key: ${{ format('npz-cache-v2-{0}-{1}', runner.os, hashFiles('data/dataset_info.json', 'src/python/micro_espectre/runtime_policy.py', 'tools/lib/csi_io.py', 'tools/lib/dataset_metadata.py', 'tools/lib/npz_cache.py', 'tools/lib/performance_report.py', 'tools/train_ml_model.py', 'tools/validate_dataset_quality.py', 'test/python/performance/test_packet_rate_adaptation_regression.py')) }}
           restore-keys: |
-            npz-cache-v1-${{ runner.os }}-
+            npz-cache-v2-${{ runner.os }}-
 
       - name: Run Product and Performance Tests with Coverage
         run: |
-          pytest test/python -n auto --dist worksteal -v --cov=src/python/micro_espectre --cov=src/python/espectre_cli --cov-branch --cov-report=json:python-coverage.json --cov-report=term-missing
-          python test/python/check_coverage.py python-coverage.json
+          mkdir -p .cache/reports/coverage
+          pytest test/python -n auto --dist worksteal -v --cov=src/python/micro_espectre --cov=src/python/espectre_cli --cov-branch --cov-report=json:.cache/reports/coverage/python-coverage.json --cov-report=term-missing
+          python test/python/check_coverage.py .cache/reports/coverage/python-coverage.json
         env:
           PYTEST_XDIST_AUTO_NUM_WORKERS: '4'
 
       - name: Build Python coverage badge
-        if: always() && hashFiles('python-coverage.json') != ''
+        if: always() && hashFiles('.cache/reports/coverage/python-coverage.json') != ''
         run: |
           python .github/scripts/build_coverage_badges.py \
             --kind python \
-            --report python-coverage.json \
+            --report .cache/reports/coverage/python-coverage.json \
             --thresholds test/python/coverage-thresholds.json \
-            --output coverage-python.json
+            --output .cache/reports/coverage/coverage-python.json
 
       - name: Upload Python coverage badge
-        if: always() && hashFiles('coverage-python.json') != ''
+        if: always() && hashFiles('.cache/reports/coverage/coverage-python.json') != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          include-hidden-files: true
           name: python-coverage-badge
-          path: coverage-python.json
+          path: .cache/reports/coverage/coverage-python.json
           retention-days: 14
 
   build-esphome:
+    permissions:
+      contents: read
+      security-events: write
     name: Build ESPHome ${{ matrix.chip }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -212,42 +219,70 @@ jobs:
           echo "ota_bin=${OTA_BIN}" >> "$GITHUB_OUTPUT"
 
       - name: Rename ESPHome firmware
-        if: github.event_name == 'push'
         run: |
-          mkdir -p output
+          mkdir -p .cache/firmware
           CHIP=$(echo "${{ matrix.chip }}" | tr '[:upper:]' '[:lower:]' | tr -d '-')
           if [ "${{ github.ref }}" = "refs/heads/develop" ]; then
             PREFIX="espectre-esphome-develop"
           else
             PREFIX="espectre-esphome-preview"
           fi
-          cp "${{ steps.esphome-artifacts.outputs.factory_bin }}" "output/${PREFIX}-${CHIP}.bin"
-          cp "${{ steps.esphome-artifacts.outputs.ota_bin }}" "output/${PREFIX}-${CHIP}-ota.bin"
+          cp "${{ steps.esphome-artifacts.outputs.factory_bin }}" ".cache/firmware/${PREFIX}-${CHIP}.bin"
+          cp "${{ steps.esphome-artifacts.outputs.ota_bin }}" ".cache/firmware/${PREFIX}-${CHIP}-ota.bin"
 
       - name: Build ESPHome compliance artifacts
-        if: github.event_name == 'push'
+        env:
+          ESPECTRE_GIT_VERSION: ${{ steps.git-version.outputs.version }}
         run: |
           PROJECT_DESCRIPTION="$(find src/cpp/frontend/esphome/examples/.esphome/build -path '*/build/project_description.json' -print -quit)"
           test -n "${PROJECT_DESCRIPTION}"
-          for FIRMWARE in output/espectre-esphome-*.bin; do
+          for FIRMWARE in .cache/firmware/espectre-esphome-*.bin; do
             python .github/scripts/build_firmware_compliance.py \
               --frontend esphome \
               --project-description "${PROJECT_DESCRIPTION}" \
               --firmware "${FIRMWARE}" \
-              --output-dir output
+              --output-dir .cache/firmware
+          done
+          # Factory and OTA images share the same linked dependency graph.
+          for FIRMWARE in .cache/firmware/espectre-esphome-*.bin; do
+            case "${FIRMWARE}" in *-ota.bin) continue ;; esac
+            python .github/scripts/audit_firmware_dependencies.py \
+              --frontend esphome --sbom "${FIRMWARE%.bin}-sbom.spdx.json" \
+              --output-dir .cache/reports/firmware/esphome
           done
 
+      - name: Summarize firmware audit
+        if: always()
+        run: |
+          if [ -f .cache/reports/firmware/esphome/summary.md ]; then
+            cat .cache/reports/firmware/esphome/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Firmware dependency audit did not run or did not produce a report.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload firmware vulnerability alerts
+        if: always() && hashFiles('.cache/reports/firmware/esphome/results.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@24c7eb380a2dc368f2d129e4c65e51d172983a1e # v4
+        with:
+          sarif_file: .cache/reports/firmware/esphome/results.sarif
+          category: firmware/esphome/${{ matrix.chip }}
+
       - name: Upload ESPHome firmware artifact
-        if: github.event_name == 'push'
+        if: success() && github.event_name == 'push'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          include-hidden-files: true
           name: firmware-esphome-${{ matrix.chip }}
           path: |
-            output/espectre-esphome-preview-*
-            output/espectre-esphome-develop-*
+            .cache/firmware/espectre-esphome-preview-*
+            .cache/firmware/espectre-esphome-develop-*
           retention-days: 7
 
   build-matter:
+    permissions:
+      contents: read
+      security-events: write
     name: Build Matter ${{ matrix.chip }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -289,7 +324,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
-            .github/.cache/matter-home
+            .cache/build/matter-home
             src/cpp/frontend/matter/app/managed_components
           key: matter-${{ runner.os }}-idf-v5.5-build-v3-${{ matrix.target }}-${{ hashFiles('requirements.txt', 'src/cpp/frontend/matter/app/main/idf_component.yml', 'src/cpp/frontend/matter/app/sdkconfig.defaults*') }}
           restore-keys: |
@@ -298,24 +333,46 @@ jobs:
 
       - name: Build Matter firmware
         run: |
-          mkdir -p output
+          mkdir -p .cache/firmware
           .github/scripts/build_matter_firmware.sh
         env:
           MATTER_TARGET: ${{ matrix.target }}
-          MATTER_OUTPUT: ${{ github.workspace }}/output/espectre-matter-${{ steps.matter-names.outputs.prefix }}-${{ matrix.target }}.bin
+          MATTER_OUTPUT: ${{ github.workspace }}/.cache/firmware/espectre-matter-${{ steps.matter-names.outputs.prefix }}-${{ matrix.target }}.bin
           MATTER_SDKCONFIG_DEFAULTS: ${{ matrix.sdkconfig_defaults || '' }}
 
+      - name: Summarize firmware audit
+        if: always()
+        run: |
+          if [ -f .cache/reports/firmware/matter/summary.md ]; then
+            cat .cache/reports/firmware/matter/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Firmware dependency audit did not run or did not produce a report.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload firmware vulnerability alerts
+        if: always() && hashFiles('.cache/reports/firmware/matter/results.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@24c7eb380a2dc368f2d129e4c65e51d172983a1e # v4
+        with:
+          sarif_file: .cache/reports/firmware/matter/results.sarif
+          category: firmware/matter/${{ matrix.chip }}
+
       - name: Upload Matter firmware artifact
-        if: github.event_name == 'push'
+        if: success() && github.event_name == 'push'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          include-hidden-files: true
           name: firmware-matter-${{ matrix.chip }}
           path: |
-            output/espectre-matter-preview*
-            output/espectre-matter-develop*
+            .cache/firmware/espectre-matter-preview*
+            .cache/firmware/espectre-matter-develop*
+            .cache/firmware/espectre-matter-ci*
           retention-days: 7
 
   build-native:
+    permissions:
+      contents: read
+      security-events: write
     name: Build Native ${{ matrix.chip }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -360,30 +417,49 @@ jobs:
       - name: Cache native toolchain
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
-          path: .github/.cache/native-home
+          path: .cache/build/native-home
           key: native-${{ runner.os }}-idf-v5.5-deps-v2-${{ hashFiles('requirements.txt') }}
           restore-keys: |
             native-${{ runner.os }}-idf-v5.5-deps-v2-
 
       - name: Build native firmware
         run: |
-          mkdir -p output
+          mkdir -p .cache/firmware
           bash .github/scripts/build_native_firmware.sh
         env:
           NATIVE_TARGET: ${{ matrix.target }}
-          NATIVE_OUTPUT: ${{ github.workspace }}/output/espectre-native-${{ steps.native-names.outputs.prefix }}-${{ matrix.target }}.bin
-          NATIVE_OTA_OUTPUT: ${{ github.workspace }}/output/espectre-native-${{ steps.native-names.outputs.prefix }}-${{ matrix.target }}-ota.bin
+          NATIVE_OUTPUT: ${{ github.workspace }}/.cache/firmware/espectre-native-${{ steps.native-names.outputs.prefix }}-${{ matrix.target }}.bin
+          NATIVE_OTA_OUTPUT: ${{ github.workspace }}/.cache/firmware/espectre-native-${{ steps.native-names.outputs.prefix }}-${{ matrix.target }}-ota.bin
           NATIVE_OTA_CHANNEL: ${{ steps.native-names.outputs.ota_channel }}
           NATIVE_SDKCONFIG_DEFAULTS: ${{ matrix.sdkconfig_defaults || '' }}
 
+      - name: Summarize firmware audit
+        if: always()
+        run: |
+          if [ -f .cache/reports/firmware/native/summary.md ]; then
+            cat .cache/reports/firmware/native/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Firmware dependency audit did not run or did not produce a report.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload firmware vulnerability alerts
+        if: always() && hashFiles('.cache/reports/firmware/native/results.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@24c7eb380a2dc368f2d129e4c65e51d172983a1e # v4
+        with:
+          sarif_file: .cache/reports/firmware/native/results.sarif
+          category: firmware/native/${{ matrix.chip }}
+
       - name: Upload native firmware artifact
-        if: github.event_name == 'push'
+        if: success() && github.event_name == 'push'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          include-hidden-files: true
           name: firmware-native-${{ matrix.chip }}
           path: |
-            output/espectre-native-preview*
-            output/espectre-native-develop*
+            .cache/firmware/espectre-native-preview*
+            .cache/firmware/espectre-native-develop*
+            .cache/firmware/espectre-native-ci*
           retention-days: 7
 
   build-sdk:
@@ -427,21 +503,22 @@ jobs:
 
       - name: Build SDK package
         run: |
-          mkdir -p output
+          mkdir -p .cache/sdk
           python .github/scripts/build_sdk_package.py \
             --channel "${{ steps.sdk.outputs.channel }}" \
             --version "${{ steps.sdk.outputs.version }}" \
             --release-tag "${{ steps.sdk.outputs.release_tag }}" \
-            --output-dir output \
+            --output-dir .cache/sdk \
             --commit "${{ github.sha }}"
 
       - name: Upload SDK package artifact
         if: github.event_name == 'push'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          include-hidden-files: true
           name: sdk-bundle
           path: |
-            output/espectre-sdk-*.tar.gz
-            output/espectre-sdk-*.zip
-            output/sdk-manifest-*.json
+            .cache/sdk/espectre-sdk-*.tar.gz
+            .cache/sdk/espectre-sdk-*.zip
+            .cache/sdk/sdk-manifest-*.json
           retention-days: 7
