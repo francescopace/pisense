@@ -49,7 +49,7 @@ export class Transport extends BaseTransport {
 
 export class ImprovSerial extends BaseImprovSerial {
     async initialize(timeout = 1000) {
-        // SDK 2.8.0 uses an async Promise executor here, which loses RPC errors.
+        // SDK 2.8.1 uses an async Promise executor here, which loses RPC errors.
         const input = this._processInput();
         await Promise.resolve();
         if (this._reader === undefined) {

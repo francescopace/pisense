@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [3.0.0-rc2] - in progress
+
+### Changes
+
+- ESPHome firmware now builds against ESPHome `2026.8.2`. The matching host packages in `requirements.txt` are aligned with that pin.
+- Website dependencies are updated to Rollup `4.63.1`, `@rollup/plugin-commonjs` `29.0.3`, `@rollup/plugin-node-resolve` `16.0.3`, and `improv-wifi-serial-sdk` `2.8.1`, including the fix for CVE-2026-27606 in Rollup. Dependabot now checks website npm dependencies weekly and targets `develop`.
+- Website CI audits the committed npm lockfile, including build dependencies, and fails for known vulnerabilities rated low or higher.
+
+---
+
 ## [3.0.0-rc1] - 2026-09-05 - Wi-Fi sensing SDK, multi-frontend support, ready for new runtimes
 
 ESPectre 3.0 makes Wi-Fi sensing a building block for your own products. This first release candidate introduces a C++ SDK and separates the sensing engine from the runtime and frontend, so developers can bring it into their own firmware and extend it to new integrations.

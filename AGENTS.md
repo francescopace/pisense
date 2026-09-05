@@ -52,6 +52,8 @@
 - Prefer the repository `./espectre` wrapper for local workflows. Use the repository virtual environment for direct Python commands when available; the wrapper uses `.venv` automatically.
 - ESP-IDF frontend builds require the ESP-IDF environment that provides `idf.py`.
 - Use Conventional Commits with an imperative, concrete, lower-case subject of at most 72 characters. Commits intended for contribution require a valid `Signed-off-by` trailer; prefer `git commit -s`.
-- Use `develop` as the default PR target; `main` is release-only. Do not bypass branch protection, push directly to `main`, force push, or merge with failing required checks.
+- Use `develop` as the default PR target; `main` is release-only. Do not bypass branch protection, push directly to `main`, force-push protected branches, or merge with failing required checks.
+- Keep pull requests free of merge commits, update their branches by rebasing, and integrate them with Rebase and merge. Do not use merge commits or squash merges.
+- Use `--force-with-lease` only on a pull request source branch when a user-authorized rebase or amendment requires rewriting published commits.
 - ESPectre is GPLv3 with separately offered commercial licenses. Do not add dependencies incompatible with GPLv3, and preserve the dual-distribution constraints described by the specialized subtree rules.
 - Declare Python dependencies in `requirements.txt` for the base workflow or `requirements-ml.txt` for ML and training extras.

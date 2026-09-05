@@ -33,6 +33,9 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: docs/web/package-lock.json
+
+      - name: Audit website dependencies
+        run: npm --prefix docs/web audit --package-lock-only --include=dev --audit-level=low
       
       - name: Build and verify Pages tree
         uses: ./.github/actions/build-pages

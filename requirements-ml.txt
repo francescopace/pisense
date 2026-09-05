@@ -1,4 +1,4 @@
 -r requirements.txt
-torch>=2.10.0           # Machine learning framework for model training/export
+torch>=2.14.0           # Machine learning framework for model training/export
 scikit-learn>=1.9.0     # ML analysis utilities used by training/validation tools
 shap>=0.52.0            # SHAP feature importance analysis for trainer diagnostics

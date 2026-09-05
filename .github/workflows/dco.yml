@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Validate commit DCO trailers
+      - name: Validate linear history and DCO trailers
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
@@ -31,9 +31,15 @@ jobs:
             });
 
             const missing = [];
+            const merges = [];
             const dcoRegex = /^Signed-off-by:\s+.+\s+<[^>]+>$/im;
 
             for (const commit of commits) {
+              if (commit.parents.length > 1) {
+                merges.push(commit.sha.substring(0, 7));
+                continue;
+              }
+
               const login = commit.author?.login || commit.committer?.login || "unknown";
               if (allowlistedLogins.has(login)) {
                 core.info(`Skipping allowlisted commit author: ${login} (${commit.sha.substring(0, 7)})`);
@@ -49,6 +55,15 @@ jobs:
               }
             }
 
+            if (merges.length > 0) {
+              core.setFailed(
+                "Merge commits are not allowed in pull requests.\n" +
+                "Rebase the source branch onto the target branch instead of merging it.\n\n" +
+                `Merge commits:\n${merges.map((sha) => `- ${sha}`).join("\n")}`
+              );
+              return;
+            }
+
             if (missing.length > 0) {
               const details = missing.map((entry) => `- ${entry.sha} (${entry.login})`).join("\n");
               core.setFailed(
@@ -59,4 +74,4 @@ jobs:
               return;
             }
 
-            core.info("DCO check passed: all commits contain Signed-off-by trailers.");
+            core.info("Commit checks passed: linear history and required DCO sign-offs.");

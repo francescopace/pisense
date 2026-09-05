@@ -99,7 +99,19 @@ The coverage helper is a Bash script used on macOS/Linux and CI. On Windows, run
 ESPectre uses a simple branching model:
 
 - **`develop`**: Active development branch. All PRs should target this branch.
-- **`main`**: Stable release branch. Merges from `develop` when releasing.
+- **`main`**: Stable release branch. Receives releases from `develop` with linear history.
+
+Use **Rebase and merge** to integrate pull requests. Merge commits and squash merges are disabled, and `main` and `develop` require linear history. Pull requests must not contain merge commits, including updates to Dependabot branches.
+
+To update your pull request branch, rebase it onto its target branch. In GitHub, choose **Update with rebase**, not **Update with merge commit**. Locally, run the following from your pull request branch:
+
+```bash
+git fetch origin
+git rebase origin/develop
+git push --force-with-lease
+```
+
+Replace `develop` with the pull request's target branch when appropriate. Rewrite only your pull request branch; never force-push `main` or `develop`.
 
 ### Workflow
 
@@ -108,7 +120,7 @@ ESPectre uses a simple branching model:
 3. **Create a branch** from `develop`:
    ```bash
    git checkout develop
-   git pull origin develop
+   git pull --ff-only origin develop
    git checkout -b feature/your-feature-name
    ```
 4. **Make changes** with tests and documentation
@@ -146,7 +158,7 @@ test: add unit tests for Hampel filter
 
 ### DCO Sign-off (required)
 
-This repository enforces the Developer Certificate of Origin (DCO) in CI. Every commit in a pull request must include a valid `Signed-off-by` trailer.
+This repository enforces the Developer Certificate of Origin (DCO) in CI. Every human-authored commit in a pull request must include a valid `Signed-off-by` trailer. Dependabot-authored commits are exempt from DCO sign-off, but all commits must satisfy the linear-history check.
 
 ### CLA (required once)
 

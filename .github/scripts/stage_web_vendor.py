@@ -35,7 +35,7 @@ def stage_vendor() -> None:
         cwd=WEB_ROOT,
         check=True,
     )
-    serial_destination = VENDOR_ROOT / "espectre-web-serial-0.6.1-2.8.0"
+    serial_destination = VENDOR_ROOT / "espectre-web-serial-0.6.1-2.8.1"
     copy_file(WEB_ROOT / "build" / "headless-web-serial.js", serial_destination / "headless.js")
     copy_file(NODE_MODULES / "esptool-js" / "LICENSE", serial_destination / "LICENSE.esptool-js")
     copy_file(

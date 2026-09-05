@@ -1,25 +1,25 @@
 # Python dependencies for ESPectre
 
 # ESPHome build workflow
-esphome==2026.7.4
-aioesphomeapi==45.7.0   # required by ESPHome 2026.7.4
-esptool==5.3.1          # aligned with ESPHome 2026.7.4
-mpremote==1.28.0        # CLI wrapper coverage in Python tests
+esphome==2026.8.2
+aioesphomeapi==45.10.3  # required by ESPHome 2026.8.2
+esptool==5.3.1          # required by ESPHome 2026.8.2
+mpremote==1.29.0        # CLI wrapper coverage in Python tests
 mpy-cross-v6.3==1.1.1   # MicroPython 1.23+ bytecode compiler used by micro deploy
 pyserial==3.5           # serial helpers used by CLI/runtime tests
 
 # Host-side CLI/runtime dependencies exercised in tests
-paho-mqtt==1.6.1        # required by ESPHome 2026.7.4 (avoid 2.x)
-click==8.3.3            # required by ESPHome 2026.7.4
-requests==2.34.2        # required by ESPHome 2026.7.4
+paho-mqtt==1.6.1        # required by ESPHome 2026.8.2 (avoid 2.x)
+click==8.3.3            # required by ESPHome 2026.8.2
+requests==2.34.2        # required by ESPHome 2026.8.2
+zeroconf==0.150.0       # required by ESPHome 2026.8.2; used for host device discovery
 colorama==0.4.6         # terminal colors
-python-dotenv==1.2.2    # environment variables support
+python-dotenv==1.2.3    # environment variables support
 PyYAML==6.0.3           # YAML parsing
 prompt_toolkit==3.0.53  # interactive CLI support
-zeroconf==0.150.0       # required by ESPHome 2026.7.4; used for host device discovery
 
 # Test dependencies
-numpy==2.4.6            # latest verified NumPy compatible with shap/numba on Python 3.14
+numpy==2.5.2            # ML environments must update through requirements-ml.txt
 pytest==9.1.1           # test framework
 pytest-cov==7.1.0       # Python coverage
 pytest-xdist==3.8.0     # parallel Python test execution
@@ -27,7 +27,7 @@ gcovr==8.6              # C++ coverage reports
 
 # Documentation build dependencies
 Jinja2==3.1.6           # m.css SDK API fragment templates
-Pygments==2.20.0        # m.css SDK API syntax highlighting
+Pygments==2.21.0        # m.css SDK API syntax highlighting
 
 # Local analysis extras
 matplotlib==3.11.1      # Plotting and visualization

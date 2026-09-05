@@ -20,7 +20,7 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-Install `requirements-ml.txt` only for training and ML-specific analysis. The main repository workflow targets Python `3.14`.
+Install `requirements-ml.txt` only for training and ML-specific analysis. When upgrading an existing ML environment, use `python -m pip install -r requirements-ml.txt` so pip resolves NumPy, Numba, SHAP, and PyTorch together. The main repository workflow targets Python `3.14`.
 
 The tools support the original ESP32, ESP32-C3, ESP32-C5, ESP32-C6, ESP32-S2, and ESP32-S3 when the required datasets or connected hardware are available. A missing dataset or hardware report does not mean that a chip is unsupported.
 

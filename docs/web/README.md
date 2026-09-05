@@ -36,7 +36,7 @@ Website tests reject stale hashes. Generated static and SDK pages compute their 
 
 ## Browser dependencies
 
-The browser installer uses a same-origin ESM bundle built from pinned `esptool-js` 0.6.1 and `improv-wifi-serial-sdk` 2.8.0 dependencies. The bundle adds ESPectre's `GET_MATTER_ONBOARDING` (`0x80`) RPC, QRCode.js 1.0.0 renders the returned Matter setup code, and ansi_up 6.0.6 renders ANSI styling in serial logs. Install and stage the dependencies locally with:
+The browser installer uses a same-origin ESM bundle built from pinned `esptool-js` 0.6.1 and `improv-wifi-serial-sdk` 2.8.1 dependencies. The bundle adds ESPectre's `GET_MATTER_ONBOARDING` (`0x80`) RPC, QRCode.js 1.0.0 renders the returned Matter setup code, and ansi_up 6.0.6 renders ANSI styling in serial logs. Install and stage the dependencies locally with:
 
 ```bash
 npm --prefix docs/web ci --ignore-scripts

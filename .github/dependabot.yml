@@ -3,10 +3,11 @@
 #
 # Supported ecosystems:
 #   - pip: Python dependencies (includes ESPHome)
+#   - npm: Website build and browser dependencies
 #   - github-actions: Workflow action versions
 #
 # Not supported by Dependabot:
-#   - C/C++: No standard package manager
+#   - ESP-IDF Component Manager: idf_component.yml and dependencies.lock
 
 version: 2
 updates:
@@ -29,9 +30,36 @@ updates:
         patterns:
           - "*"
     ignore:
-      # paho-mqtt 2.x is incompatible with ESPHome (requires 1.6.1)
+      # ESPHome pins these direct project dependencies to exact versions.
+      # Update their requirements.txt pins and review this list with each ESPHome upgrade.
+      # target-branch scopes these exclusions to version updates on develop.
+      - dependency-name: "aioesphomeapi"
+      - dependency-name: "click"
+      - dependency-name: "colorama"
+      - dependency-name: "esptool"
+      - dependency-name: "jinja2"
       - dependency-name: "paho-mqtt"
-        update-types: ["version-update:semver-major"]
+      - dependency-name: "pyserial"
+      - dependency-name: "pyyaml"
+      - dependency-name: "requests"
+      - dependency-name: "zeroconf"
+
+  # Website build and browser dependencies
+  - package-ecosystem: "npm"
+    directory: "/docs/web"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(web)"
+    labels:
+      - "dependencies"
+    groups:
+      web-dependencies:
+        patterns:
+          - "*"
 
   # GitHub Actions
   # Monitors: actions/checkout, actions/setup-python, actions/upload-artifact, etc.

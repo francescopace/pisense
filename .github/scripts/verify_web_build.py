@@ -349,11 +349,11 @@ def verify(args: argparse.Namespace) -> None:
         "vendor/qrcodejs-1.0.0/LICENSE",
         "vendor/ansi_up-6.0.6/ansi_up.js",
         "vendor/ansi_up-6.0.6/LICENSE",
-        "vendor/espectre-web-serial-0.6.1-2.8.0/headless.js",
-        "vendor/espectre-web-serial-0.6.1-2.8.0/LICENSE.esptool-js",
-        "vendor/espectre-web-serial-0.6.1-2.8.0/LICENSE.atob-lite",
-        "vendor/espectre-web-serial-0.6.1-2.8.0/LICENSE.improv-wifi-serial-sdk",
-        "vendor/espectre-web-serial-0.6.1-2.8.0/LICENSE.pako",
+        "vendor/espectre-web-serial-0.6.1-2.8.1/headless.js",
+        "vendor/espectre-web-serial-0.6.1-2.8.1/LICENSE.esptool-js",
+        "vendor/espectre-web-serial-0.6.1-2.8.1/LICENSE.atob-lite",
+        "vendor/espectre-web-serial-0.6.1-2.8.1/LICENSE.improv-wifi-serial-sdk",
+        "vendor/espectre-web-serial-0.6.1-2.8.1/LICENSE.pako",
         "artifacts/sdk/api/api-index.json",
     ):
         require_file(path)
