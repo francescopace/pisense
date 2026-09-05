@@ -47,12 +47,7 @@ setup_paths()
 import config  # noqa: E402
 from tools.lib.ml_training import (
     augmentation,
-    dataset,
-    evaluation,
-    export,
     feature_cache,
-    preprocessing,
-    training,
 )
 from tools.lib.lightweight_detector import LightweightDetector  # noqa: E402
 from tools.lib.ml_weights import FEATURE_NAMES  # noqa: E402
@@ -592,7 +587,7 @@ def build_replay_cache(
         window_packets = detector_window_packets(packets_for_window)
         deoverlapped = np.zeros(len(rows), dtype=bool)
         last_boundary_by_reset: Dict[int, int] = {}
-        for row_index, (packet, reset) in enumerate(zip(packet_index, reset_index)):
+        for row_index, (packet, reset) in enumerate(zip(packet_index, reset_index, strict=True)):
             last_boundary = last_boundary_by_reset.get(int(reset))
             if (
                 last_boundary is None

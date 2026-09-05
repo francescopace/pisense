@@ -29,9 +29,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from tools.lib.bootstrap import setup_paths  # noqa: F401
 
-from tools.lib.csi_io import load_npz_as_packets, load_static_presence_and_motion
+from tools.lib.csi_io import load_static_presence_and_motion
 from tools.lib.dataset_metadata import (
-    DATA_DIR,
     estimate_runtime_threshold,
     detector_window_packets,
     load_dataset_info,
@@ -681,7 +680,7 @@ def print_comparison_summary(methods, classic_baseline, classic_movement,
         for metric_name, getter, lower_is_better in metric_rows:
             values = [getter(r) for r in prod_results]
             best_value = min(values) if lower_is_better else max(values)
-            winners = [r['name'] for r, v in zip(prod_results, values) if v == best_value]
+            winners = [r['name'] for r, v in zip(prod_results, values, strict=True) if v == best_value]
             winner = winners[0] if len(winners) == 1 else 'Tie'
             if winner != 'Tie':
                 wins[winner] += 1

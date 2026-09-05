@@ -30,7 +30,6 @@ from tools.lib.bootstrap import setup_paths  # noqa: F401
 from tools.lib.csi_analysis import calculate_spatial_turbulence
 from tools.lib.csi_io import load_npz_as_packets, load_static_presence_and_motion
 from tools.lib.dataset_metadata import (
-    DATA_DIR,
     load_dataset_info,
     resolve_entry_path,
     resolve_explicit_pair,

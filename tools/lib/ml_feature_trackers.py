@@ -12,11 +12,6 @@ Author: Francesco Pace <francesco.pace@gmail.com>
 import math
 import time
 
-try:
-    from .csi_features import L1_DELTA_LAG
-except ImportError:
-    from csi_features import L1_DELTA_LAG
-
 
 HT20_CSI_LEN = 128
 HT20_LIVE_BINS = tuple(range(4, 32)) + tuple(range(33, 61))

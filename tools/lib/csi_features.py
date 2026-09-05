@@ -7,7 +7,6 @@ Pure-Python production feature extraction used by host replay and validation.
 
 Author: Francesco Pace <francesco.pace@gmail.com>
 """
-import math
 
 from micro_espectre.detector_interface import MotionState
 

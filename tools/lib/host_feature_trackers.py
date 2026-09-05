@@ -645,6 +645,7 @@ class ChannelShapeTrajectoryTracker:
         for (previous_bin, previous), (current_bin, current) in zip(
             path,
             path[1:],
+            strict=False,
         ):
             if current_bin - previous_bin != 1:
                 continue
@@ -660,6 +661,7 @@ class ChannelShapeTrajectoryTracker:
             path,
             path[1:],
             path[2:],
+            strict=False,
         ):
             previous_dt = middle_bin - first_bin
             current_dt = last_bin - middle_bin
@@ -725,7 +727,7 @@ class ChannelShapeTrajectoryTracker:
         for (first_bin, first_modes), (middle_bin, middle_modes), (
             last_bin,
             last_modes,
-        ) in zip(path, path[1:], path[2:]):
+        ) in zip(path, path[1:], path[2:], strict=False):
             previous_dt = middle_bin - first_bin
             current_dt = last_bin - middle_bin
             if previous_dt <= 0 or current_dt <= 0:
@@ -812,7 +814,7 @@ class AmplitudeProfileTracker:
         if len(self._profiles) < 2:
             return 0.0
         values = []
-        for previous, current in zip(self._profiles, self._profiles[1:]):
+        for previous, current in zip(self._profiles, self._profiles[1:], strict=False):
             if previous.shape != current.shape:
                 continue
             previous_centered = previous - float(np.mean(previous))

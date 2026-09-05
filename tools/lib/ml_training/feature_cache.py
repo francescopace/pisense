@@ -18,15 +18,9 @@ from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 from tools.lib.dataset_metadata import (
-    admitted_dataset_role,
-    dataset_role,
     measure_packet_interval_us,
-    paired_dataset_role,
-    resolve_entry_path,
 )
 from tools.lib.repo_paths import (
-    cpp_core_dir,
-    generated_data_dir,
     tools_lib_dir,
     python_src_dir,
 )
@@ -37,17 +31,12 @@ from config import (
     DEFAULT_SUBCARRIERS,
     ENABLE_HAMPEL_FILTER,
     ENABLE_LOWPASS_FILTER,
-    EVALUATION_INTERVAL_MS,
     HAMPEL_THRESHOLD,
     HAMPEL_WINDOW,
     LOWPASS_CUTOFF,
-    MOTION_OFF_HITS,
-    MOTION_ON_HITS,
     SEGMENTATION_WINDOW_SIZE_MS,
 )
 from tools.lib.runtime_policy import (
-    RuntimeMotionPolicy,
-    derive_detector_timing,
     nominal_packet_interval_us,
 )
 from tools.lib.temporal_csi_sampler import (
@@ -59,9 +48,6 @@ from tools.lib.ml_feature_trackers import (
     ChannelShapeTrajectoryTracker as ProductionChannelShapeTrajectoryTracker,
 )
 from tools.lib.performance_report import (
-    STRESS_TARGET_FP_RATE,
-    STRESS_TARGET_RECALL,
-    build_ml_replay_rows,
     load_or_compute_ml_replay_rows,
     timing_cadence_for_window,
 )
@@ -530,13 +516,12 @@ def _load_or_compute_packet_augmentation_mix_rows(record, *,
                 return cached
         views = []
         for view_index, seed in enumerate(seeds):
-            packets_factory = lambda current_record=record, current_seed=seed: (
-                _prepare_feature_packets_for_record(
+            def packets_factory(current_record=record, current_seed=seed):
+                return _prepare_feature_packets_for_record(
                     current_record,
                     packet_augmentation=packet_augmentation,
                     augmentation_seed=current_seed,
                 )
-            )
             if use_runtime_cache:
                 rows = load_or_compute_ml_replay_rows(
                     record['path'],

@@ -22,7 +22,7 @@ import uuid
 from collections import OrderedDict
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, Mapping, MutableMapping, Optional
+from typing import Any, Callable, Iterator, Mapping, MutableMapping, Optional
 
 import numpy as np
 

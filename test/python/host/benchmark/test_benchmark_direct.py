@@ -22,7 +22,6 @@ from src.python.espectre_cli.device_transport import (
     DirectProtocolError,
     DirectRequestError,
 )
-from src.python.micro_espectre import protocol
 
 
 @pytest.mark.parametrize(

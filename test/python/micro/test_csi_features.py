@@ -251,7 +251,7 @@ class TestFeatureSemantics:
             l1_delta_lag_ratio=1.4,
             **_promoted_tracker_kwargs())
 
-        for name, before, after in zip(DEFAULT_FEATURES, base, boosted):
+        for name, before, after in zip(DEFAULT_FEATURES, base, boosted, strict=True):
             assert after == pytest.approx(before, abs=1e-9), (
                 f"{name} moved when both streams were scaled by 10")
 

@@ -9,6 +9,9 @@ Mirrors utils.h from ESPectre C++ implementation.
 Author: Francesco Pace <francesco.pace@gmail.com>
 """
 
+# This module intentionally mirrors and re-exports the device utility surface.
+# ruff: noqa: F401
+
 import math
 
 from micro_espectre.device_utils import (

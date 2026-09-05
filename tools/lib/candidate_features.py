@@ -236,7 +236,7 @@ def assemble_feature_vector(
     candidate_feature_values: Mapping[str, float],
 ) -> List[float]:
     """Rebuild the full feature vector in the caller's requested order."""
-    production_lookup = dict(zip(production_names, production_values))
+    production_lookup = dict(zip(production_names, production_values, strict=True))
     return [
         candidate_feature_values[name]
         if name in candidate_feature_values
@@ -267,9 +267,6 @@ def candidate_values(
             aggregated_turbulence_series,
             dtype=np.float64,
         )
-    l1_deltas = None
-    if l1_series is not None:
-        l1_deltas = np.asarray(l1_series, dtype=np.float64)
     mean_denom = None
     iqr = None
     q95 = None

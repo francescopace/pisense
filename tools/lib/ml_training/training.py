@@ -19,22 +19,13 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
-from tools.lib.atomic_io import atomic_savez, atomic_write_set, atomic_write_text
-from contextlib import contextmanager, nullcontext
+from tools.lib.atomic_io import atomic_write_set, atomic_write_text
+from contextlib import contextmanager
 from datetime import datetime
 from time import perf_counter
 from tools.lib.dataset_metadata import DATA_DIR
 from tools.lib.csi_features import (
-    AGGREGATED_TURBULENCE_FEATURES,
-    ALL_FEATURES,
     DEFAULT_FEATURES,
-    L1_DELTA_LAG,
-    L1_TRACKER_FEATURES,
-    L1DeltaTracker,
-    TURB_IQR_AGGREGATION_WIDTH,
-    calc_autocorrelation,
-    calc_zero_crossing_rate,
-    extract_features_by_name,
 )
 
 try:
@@ -302,7 +293,7 @@ def normalize_architecture_specs(architectures):
     """Normalize architecture definitions into {name, layers} dicts."""
     specs = []
     seen = set()
-    for idx, arch in enumerate(architectures):
+    for arch in architectures:
         if isinstance(arch, dict):
             layers = parse_hidden_layers(arch.get('layers'))
             name = str(arch.get('name') or f"MLP ({format_hidden_layers(layers)})")
@@ -836,7 +827,7 @@ def cross_validate(X, y, hidden_layers=None, n_folds=DEFAULT_CV_FOLDS, max_epoch
         feature_names = shap_feature_names or [f'feature_{idx}' for idx in range(X.shape[1])]
         mean_abs_shap = shap_abs_sum / shap_count
         result['shap_importance'] = dict(sorted(
-            ((name, float(value)) for name, value in zip(feature_names, mean_abs_shap)),
+            ((name, float(value)) for name, value in zip(feature_names, mean_abs_shap, strict=True)),
             key=lambda item: item[1],
             reverse=True,
         ))
@@ -2034,7 +2025,8 @@ def train_all(fp_weight=DEFAULT_FP_WEIGHT, seed=None, feature_names=None,
 
     if evaluate_deployment:
         print("\nEvaluating in-memory candidate on deployment safety recordings...")
-        gate_progress = lambda message: print(f"  {message}")
+        def gate_progress(message):
+            print(f"  {message}")
         paired_gate = evaluate_paired_gate(
             model,
             scaler,

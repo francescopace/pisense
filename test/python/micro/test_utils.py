@@ -29,7 +29,6 @@ from utils import (
     LAYOUT_BINS_UNKNOWN,
     detect_ht20_bin_layout,
     rotate_ht20_classic_to_centered,
-    NORMALIZATION_DOUBLE_HT57_TO_64,
     NORMALIZATION_HT57_TO_64,
     REASON_NONE,
     REASON_UNKNOWN_LAYOUT,

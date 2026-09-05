@@ -14,10 +14,10 @@ import pytest
 
 from support.chip_matrix import DETECTION_CHIPS
 from tools.lib.performance_report import (
-    extract_motion_start_from_description,
+    extract_motion_start_from_description,  # noqa: F401 - re-exported test support API
     get_available_long_test_dataset_specs,
-    get_available_long_test_datasets,
-    load_long_test_dataset,
+    get_available_long_test_datasets,  # noqa: F401 - re-exported test support API
+    load_long_test_dataset,  # noqa: F401 - re-exported test support API
 )
 from tools.lib.repo_paths import repo_root
 

@@ -11,9 +11,8 @@ import platform
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Optional
 
-import numpy as np
 
 from . import npz_cache
 from .dataset_metadata import dataset_info_revision, load_dataset_info
@@ -216,7 +215,7 @@ def compute_reserved_augmentation_diagnostic() -> Optional[dict[str, Any]]:
                 ml_views[phase].append(ml_rows[phase])
             pair_counts["classic"] = [
                 total + value
-                for total, value in zip(pair_counts["classic"], current_classic)
+                for total, value in zip(pair_counts["classic"], current_classic, strict=True)
             ]
         if not pair_complete:
             continue
@@ -236,7 +235,7 @@ def compute_reserved_augmentation_diagnostic() -> Optional[dict[str, Any]]:
         for detector in counts:
             counts[detector] = [
                 total + value
-                for total, value in zip(counts[detector], pair_counts[detector])
+                for total, value in zip(counts[detector], pair_counts[detector], strict=True)
             ]
 
     if not pair_count:

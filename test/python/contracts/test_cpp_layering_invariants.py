@@ -73,7 +73,7 @@ def test_cpp_dataset_and_coverage_contracts_are_complete() -> None:
     assert set(chip_list.group("chips").split()) == set(DETECTION_CHIPS)
     assert "SKIP_RETURN_CODE 77" in test_cmake
     for gate in ("normal", "reserved", "long", "weak", "empty", "packet_rate"):
-        assert f"add_espectre_dataset_cases(" in test_cmake
+        assert "add_espectre_dataset_cases(" in test_cmake
         assert re.search(rf"add_espectre_dataset_cases\([^\n]+ {gate}\)", test_cmake)
 
     thresholds = json.loads(CPP_COVERAGE_THRESHOLDS.read_text(encoding="utf-8"))

@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from types import MappingProxyType
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 

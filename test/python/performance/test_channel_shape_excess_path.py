@@ -28,7 +28,7 @@ def evaluate_path(amplitude_path, gains=None, duplicate=False):
     )
     if gains is None:
         gains = [1] * len(amplitude_path)
-    for index, (amplitudes, gain) in enumerate(zip(amplitude_path, gains)):
+    for index, (amplitudes, gain) in enumerate(zip(amplitude_path, gains, strict=True)):
         timestamp_us = index * CHANNEL_SHAPE_BIN_US
         payload = payload_from_subband_amplitudes(amplitudes, gain)
         tracker.process_packet(payload, timestamp_us)
@@ -168,7 +168,7 @@ def test_missing_bins_are_not_interpolated() -> None:
     path = curved_path(count=5)
     tracker = ChannelShapeExcessPathTracker()
     timestamps = [0, 80_000, 240_000, 320_000, 400_000]
-    for amplitudes, timestamp_us in zip(path, timestamps):
+    for amplitudes, timestamp_us in zip(path, timestamps, strict=True):
         tracker.process_packet(
             payload_from_subband_amplitudes(amplitudes),
             timestamp_us,

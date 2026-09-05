@@ -231,7 +231,7 @@ def balanced_sample_weights(
     weights = np.ones(len(y), dtype=np.float64)
     for key in (y, chip, session):
         values, counts = np.unique(key, return_counts=True)
-        lookup = {value: count for value, count in zip(values, counts)}
+        lookup = {value: count for value, count in zip(values, counts, strict=True)}
         weights *= np.asarray([1.0 / lookup[value] for value in key], dtype=np.float64)
     return weights * (len(y) / weights.sum())
 

@@ -99,7 +99,7 @@ def analyze_direct_evidence(
         metrics.status_last_timestamp_ms = timestamps[-1]
     host_times = [float(sample["host_elapsed_seconds"]) for sample in samples]
     if len(host_times) > 1:
-        host_gaps = [(right - left) * 1000.0 for left, right in zip(host_times, host_times[1:])]
+        host_gaps = [(right - left) * 1000.0 for left, right in zip(host_times, host_times[1:], strict=False)]
         gaps = []
         stale_timestamps = 0
         for index, host_gap in enumerate(host_gaps):
@@ -127,7 +127,7 @@ def analyze_direct_evidence(
         )
     if require_motion and metrics.motion_samples < MIN_MOTION_SAMPLES:
         reasons.append(f"only {metrics.motion_samples}/{MIN_MOTION_SAMPLES} Direct motion events were received")
-    if any(right < left for left, right in zip(uptimes, uptimes[1:])):
+    if any(right < left for left, right in zip(uptimes, uptimes[1:], strict=False)):
         metrics.device_reboots = 1
         reasons.append("Direct uptime regressed during the scored window")
 

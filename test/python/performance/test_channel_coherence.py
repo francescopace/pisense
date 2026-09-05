@@ -177,7 +177,7 @@ def test_random_pairs_match_the_reference() -> None:
 
 
 def test_zero_profiles_are_guarded_rather_than_divided() -> None:
-    zeros = [0j] * HT20_LIVE_WIDTH
+    [0j] * HT20_LIVE_WIDTH
     np_zeros = np.zeros(HT20_LIVE_WIDTH, dtype=np.complex128)
 
     assert host.delay_compensated_coherence(np_zeros, np_zeros) == 0.0

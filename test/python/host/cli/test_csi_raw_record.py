@@ -698,7 +698,7 @@ def test_parse_packet_reads_transport_backpressure_total():
 
 def test_parse_packet_reads_transport_counters():
     receiver = CSIReceiver(bind_host='127.0.0.1')
-    packet = receiver._parse_packet(
+    receiver._parse_packet(
         build_packet(
             seq_num=44,
             fresh_record_total=123,

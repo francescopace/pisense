@@ -35,7 +35,7 @@ import os
 import sys
 from itertools import combinations
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 import numpy as np
 
@@ -49,17 +49,11 @@ from tools.lib.bootstrap import setup_paths  # noqa: E402
 setup_paths()
 
 from tools.lib.ml_training import (
-    augmentation,
     dataset,
-    evaluation,
-    export,
     feature_cache,
-    preprocessing,
-    training,
 )
 from tools import replay_lightweight_candidates as candidate_replay  # noqa: E402
 from tools.lib.ml_weights import FEATURE_NAMES  # noqa: E402
-from tools.lib.candidate_features import CANDIDATE_FEATURES  # noqa: E402
 from tools.lib.dataset_metadata import load_dataset_info  # noqa: E402
 
 FIT_ROLES = ("train",)

@@ -375,7 +375,7 @@ def test_packet_rate_adaptation_regression_matrix(pair_spec: PacketRateSourcePai
     assert max(movement_counts) <= 245
     assert max(movement_counts) - min(movement_counts) <= 20
 
-    for summary, target_pps in zip(summaries, TARGET_PPS):
+    for summary, target_pps in zip(summaries, TARGET_PPS, strict=True):
         timing = summary["timing"]
         expected_interval_us = int(round(1_000_000.0 / float(target_pps)))
         expected = derive_detector_timing(expected_interval_us)

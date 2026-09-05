@@ -59,39 +59,13 @@ setup_paths()
 import argparse
 from pathlib import Path
 from tools.lib.csi_features import (
-    AGGREGATED_TURBULENCE_FEATURES,
     ALL_FEATURES,
-    DEFAULT_FEATURES,
-    L1_DELTA_LAG,
-    L1_TRACKER_FEATURES,
-    L1DeltaTracker,
-    TURB_IQR_AGGREGATION_WIDTH,
-    calc_autocorrelation,
-    calc_zero_crossing_rate,
-    extract_features_by_name,
 )
 from tools.lib.candidate_features import (
     CANDIDATE_FEATURES,
-    assemble_feature_vector,
-    candidate_feature_cache_identity,
-    candidate_values,
-    needs_aggregated_turbulence,
-    needs_amplitude_profiles,
-    needs_channel_coherence,
-    needs_channel_shape,
-    needs_channel_shape_trajectory,
-    needs_l1_series as needs_candidate_l1_series,
-    needs_phase_residual,
-    needs_subband_coherence,
-    split_feature_names,
 )
 from tools.lib.host_feature_trackers import (
-    AmplitudeProfileTracker,
     CHANNEL_SHAPE_BIN_US,
-    ChannelCoherenceTracker,
-    ChannelShapeTrajectoryTracker,
-    ChannelShapeTracker,
-    PhaseResidualTracker,
 )
 from tools.lib.high_accuracy_detector import (  # noqa: F401 (re-exported for tests)
     FEATURE_NAMES as EXPORTED_FEATURE_NAMES,
@@ -126,7 +100,6 @@ from tools.lib.ml_training.export import (
 )
 
 from tools.lib.ml_training.feature_cache import (
-    ACTIVE_TRAJECTORY_BIN_US,
     TRAINING_FEATURES,
     selectable_features,
     set_active_trajectory_bin_ms,

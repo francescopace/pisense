@@ -14,11 +14,8 @@ import numpy as np
 from functools import lru_cache
 from pathlib import Path
 from tools.lib.dataset_metadata import (
-    admitted_dataset_role,
     dataset_role,
-    measure_packet_interval_us,
-    paired_dataset_role,
-    resolve_entry_path,
+    measure_packet_interval_us,  # noqa: F401 - re-exported for training callers
 )
 from tools.lib.repo_paths import (
     cpp_core_dir,
@@ -34,34 +31,12 @@ from tools.lib.csi_io import load_npz_packet_view
 from tools.lib.dataset_metadata import DATA_DIR
 from config import (
     DEFAULT_SUBCARRIERS,
-    ENABLE_HAMPEL_FILTER,
-    ENABLE_LOWPASS_FILTER,
-    EVALUATION_INTERVAL_MS,
-    HAMPEL_THRESHOLD,
-    HAMPEL_WINDOW,
-    LOWPASS_CUTOFF,
-    MOTION_OFF_HITS,
-    MOTION_ON_HITS,
-    SEGMENTATION_WINDOW_SIZE_MS,
 )
 from tools.lib.performance_report import (
-    STRESS_TARGET_FP_RATE,
-    STRESS_TARGET_RECALL,
-    build_ml_replay_rows,
     load_or_compute_ml_replay_rows,
-    timing_cadence_for_window,
 )
 from tools.lib.csi_features import (
-    AGGREGATED_TURBULENCE_FEATURES,
-    ALL_FEATURES,
     DEFAULT_FEATURES,
-    L1_DELTA_LAG,
-    L1_TRACKER_FEATURES,
-    L1DeltaTracker,
-    TURB_IQR_AGGREGATION_WIDTH,
-    calc_autocorrelation,
-    calc_zero_crossing_rate,
-    extract_features_by_name,
 )
 
 from .augmentation import (
@@ -133,7 +108,6 @@ TIMING_QUALITY_POLICIES = (
 
 def load_dataset_info():
     """Load dataset_info.json with label mappings."""
-    import json
     info_path = DATA_DIR / 'dataset_info.json'
     if info_path.exists():
         with open(info_path, 'r') as f:
@@ -879,11 +853,11 @@ def load_training_matrix(environment_filter=None, excluded_chips=None,
             )
             replay_rows = load_or_compute_ml_replay_rows(
                 record['path'],
-                packets_factory=lambda current_record=record: (
+                packets_factory=lambda current_record=record, current_seed=resolved_seed: (
                     _prepare_feature_packets_for_record(
                         current_record,
                         packet_augmentation=packet_augmentation,
-                        augmentation_seed=resolved_seed,
+                        augmentation_seed=current_seed,
                     )
                 ),
                 selected_subcarriers=DEFAULT_SUBCARRIERS,
@@ -917,11 +891,11 @@ def load_training_matrix(environment_filter=None, excluded_chips=None,
             )
             replay_rows = load_or_compute_host_feature_rows(
                 record['path'],
-                packets_factory=lambda current_record=record: (
+                packets_factory=lambda current_record=record, current_seed=resolved_seed: (
                     _prepare_feature_packets_for_record(
                         current_record,
                         packet_augmentation=packet_augmentation,
-                        augmentation_seed=resolved_seed,
+                        augmentation_seed=current_seed,
                     )
                 ),
                 feature_names=feature_names,

@@ -114,7 +114,7 @@ def create_detector(detection_algorithm, window_packets):
     try:
         detector_class = load_detector_class(detection_algorithm)
     except ValueError:
-        raise ValueError(f"Unsupported Micro detector: {detection_algorithm}")
+        raise ValueError(f"Unsupported Micro detector: {detection_algorithm}") from None
 
     print_log("INFO", "Detection algorithm: {}".format(get_detector_label(detection_algorithm)))
     detector = detector_class(
@@ -171,7 +171,6 @@ def run_startup_calibration(wlan, detector, traffic_gen):
         temporal_window_slots,
     )
 
-    detector_window_packets = detector.get_window_size()
     target_pps = max(1, int(getattr(config, 'CSI_TARGET_PPS', 100)))
     calibration_target_packets = temporal_window_slots(
         target_pps,
@@ -581,7 +580,7 @@ def main(wlan=None):
                     break
             time.sleep(0.05)
         deltas = []
-        for previous, current in zip(csi_timestamps, csi_timestamps[1:]):
+        for previous, current in zip(csi_timestamps, csi_timestamps[1:], strict=False):
             delta = (current - previous) % (1 << 32)
             if 0 < delta < (1 << 31):
                 deltas.append(delta)

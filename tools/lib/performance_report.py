@@ -1237,7 +1237,7 @@ def _calibrate_classic_replay_rows(
     resets = np.asarray(rows.get("reset_index", np.empty(0)), dtype=np.int32)
 
     for values, row_ready, packet_weight, reset_index in zip(
-        X, ready, weights, resets
+        X, ready, weights, resets, strict=True
     ):
         current_reset = int(reset_index)
         if last_reset is not None and current_reset != last_reset:
@@ -1291,7 +1291,7 @@ def _score_classic_replay_phase_rows(
     resets = np.asarray(rows.get("reset_index", np.empty(0)), dtype=np.int32)
     last_reset: Optional[int] = None
     for values, row_ready, row_eligible, reset_index in zip(
-        X, ready, eligible, resets
+        X, ready, eligible, resets, strict=True
     ):
         current_reset = int(reset_index)
         if last_reset is not None and current_reset != last_reset:

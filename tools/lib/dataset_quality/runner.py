@@ -32,7 +32,6 @@ from .pairing import (
     _evaluate_pair_capture,
     _excluded_idle_unusable_results,
     refresh_metadata,
-    refresh_pair_metadata,
     summarize_pair_rows,
 )
 from .readiness import (

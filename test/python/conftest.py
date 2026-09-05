@@ -43,14 +43,12 @@ _prepend_sys_path(PYTHON_ROOT_PATH)
 
 from support.performance import (
     build_long_test_params,
-    configure_performance_session,
     format_targets_summary_line,
     get_classic_fp_rate_target,
     get_classic_recall_target,
     get_ml_fp_rate_target,
     get_ml_recall_target,
     load_long_test_dataset,
-    write_performance_terminal_summary,
 )
 from tools.lib.repo_paths import data_dir, tools_lib_dir, python_src_dir, repo_root
 
@@ -286,7 +284,7 @@ def synthetic_csi_static_presence_packets():
     """Generate synthetic baseline CSI packets (stable signal)"""
     np.random.seed(42)
     packets = []
-    for i in range(100):
+    for _i in range(100):
         # Stable signal with small variations
         base_amplitude = 30
         iq_data = np.zeros(128, dtype=np.int8)
@@ -311,7 +309,7 @@ def synthetic_csi_motion_packets():
     """Generate synthetic movement CSI packets (variable signal)"""
     np.random.seed(43)
     packets = []
-    for i in range(100):
+    for _i in range(100):
         # Variable signal with larger variations
         base_amplitude = 25 + np.random.uniform(-10, 10)
         iq_data = np.zeros(128, dtype=np.int8)

@@ -68,7 +68,7 @@ class SessionBalancedRobustScaler:
             raise ValueError("scaler inputs must have matching rows")
 
         strata = {}
-        for idx, key in enumerate(zip(groups.tolist(), y.tolist())):
+        for idx, key in enumerate(zip(groups.tolist(), y.tolist(), strict=True)):
             strata.setdefault((str(key[0]), int(key[1])), []).append(idx)
         non_empty = [indices for indices in strata.values() if indices]
         if not non_empty:

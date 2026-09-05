@@ -314,10 +314,10 @@ class TestIsMotion:
         prob = predict(features)
         
         # With threshold above probability, should be False
-        assert is_motion(features, threshold=prob + 0.1) == False
+        assert not is_motion(features, threshold=prob + 0.1)
         # With threshold below probability, should be True
         if prob > 0.01:
-            assert is_motion(features, threshold=prob - 0.01) == True
+            assert is_motion(features, threshold=prob - 0.01)
 
 
 class TestHighAccuracyDetector:
@@ -330,7 +330,7 @@ class TestHighAccuracyDetector:
         assert detector._threshold == HIGH_ACCURACY_DEFAULT_THRESHOLD
         assert detector._state == MotionState.IDLE
         assert detector._packet_count == 0
-        assert detector.track_data == False
+        assert not detector.track_data
     
     def test_hampel_enabled_by_default(self):
         """Hampel filter is enabled by default (matches training pipeline)."""
@@ -378,15 +378,15 @@ class TestHighAccuracyDetector:
     def test_set_threshold_valid(self):
         """Test setting valid threshold."""
         detector = HighAccuracyDetector()
-        assert detector.set_threshold(0.7) == True
+        assert detector.set_threshold(0.7)
         assert detector._threshold == 0.7
     
     def test_set_threshold_invalid(self):
         """Test setting invalid threshold."""
         detector = HighAccuracyDetector()
         original = detector._threshold
-        assert detector.set_threshold(1.1) == False
-        assert detector.set_threshold(-0.1) == False
+        assert not detector.set_threshold(1.1)
+        assert not detector.set_threshold(-0.1)
         assert detector._threshold == original
 
     def test_detector_initializes_segmentation_context(self):
@@ -397,7 +397,7 @@ class TestHighAccuracyDetector:
     def test_is_ready_empty(self):
         """Detector is not ready before filling buffer."""
         detector = HighAccuracyDetector(window_size=50)
-        assert detector.is_ready() == False
+        assert not detector.is_ready()
     
     def test_get_motion_metric_initial(self):
         """Initial motion metric is 0."""
@@ -472,7 +472,7 @@ class TestHighAccuracyDetectorProcessing:
             detector.process_packet(sample_csi_data, subcarriers)
         
         assert detector._packet_count == 10
-        assert detector.is_ready() == True
+        assert detector.is_ready()
     
     def test_update_state_before_ready(self, detector, sample_csi_data):
         """Update state before buffer is full returns default values."""
@@ -616,7 +616,7 @@ class TestHighAccuracyDetectorMotionTracking:
         detector = HighAccuracyDetector(window_size=10, threshold=0.0)
         
         subcarriers = DEFAULT_SUBCARRIERS
-        for i in range(10):
+        for _i in range(10):
             csi_data = [50] * 128
             detector.process_packet(csi_data, subcarriers)
         

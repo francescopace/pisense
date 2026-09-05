@@ -362,7 +362,6 @@ def _run_live_collect(args) -> None:
     from tools.lib.runtime_policy import (
         PacketTimingTracker,
         RuntimeMotionPolicy,
-        derive_detector_timing,
         duration_packet_count,
         nominal_packet_interval_us,
     )
@@ -1281,7 +1280,7 @@ def _run_live_collect(args) -> None:
             if temporal_controller.sampler.gap_reset_required:
                 reset_temporal_device(device_state)
                 calibration_render_due = True
-            calibration_trackers = [
+            [
                 slot["calibration_tracker"]
                 for slot in device_state["slots"]
                 if slot["calibration_tracker"] is not None

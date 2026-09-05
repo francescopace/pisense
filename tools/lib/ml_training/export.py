@@ -14,7 +14,7 @@ import numpy as np
 import shutil
 import tempfile
 from pathlib import Path
-from tools.lib.atomic_io import atomic_savez, atomic_write_set, atomic_write_text
+from tools.lib.atomic_io import atomic_savez, atomic_write_text
 from datetime import datetime
 
 try:
@@ -238,7 +238,7 @@ def predict_exported_probabilities_from_weights(weights_module, X_raw):
             layer_index == len(matrices) - 1,
         )
         for layer_index, (layer_weights, layer_biases) in enumerate(
-            zip(matrices, weights_module.BIASES)
+            zip(matrices, weights_module.BIASES, strict=True)
         )
     ]
     return predict_probabilities_from_arrays(X_raw, center, scale, layers)
@@ -308,7 +308,6 @@ def render_micropython_weights(weights, center, scale, architecture, seed=None,
                                scaler_mode=DEFAULT_SCALER_MODE,
                                trained_at=None):
     """Render inference-ready MicroPython weights without a runtime transpose."""
-    from datetime import datetime
     if feature_names is None:
         feature_names = list(TRAINING_FEATURES)
     seed_info = f"Seed: {seed}"
@@ -450,7 +449,6 @@ def export_cpp_weights(model, scaler, output_path, seed=None,
     Returns:
         Size of generated code
     """
-    from datetime import datetime
 
     def cpp_float(value):
         """Render a numeric literal with a valid C++ float suffix."""

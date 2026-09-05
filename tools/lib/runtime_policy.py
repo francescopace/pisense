@@ -22,9 +22,9 @@ from micro_espectre.config import (
 )
 from micro_espectre.runtime_motion_policy import (
     UINT32_MODULUS as _UINT32_MODULUS,
-    RuntimeMotionPolicy,
-    equivalent_packet_weight,
-    make_evaluation_cadence,
+    RuntimeMotionPolicy,  # noqa: F401 - re-exported for host-side policy consumers
+    equivalent_packet_weight,  # noqa: F401 - re-exported for host-side policy consumers
+    make_evaluation_cadence,  # noqa: F401 - re-exported for host-side policy consumers
 )
 
 DEFAULT_GAP_RESET_RATIO = 4.0

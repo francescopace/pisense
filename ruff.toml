@@ -5,3 +5,13 @@ extend-exclude = [".esphome", "build", "build-*", "managed_components", "third_p
 
 [lint]
 select = ["E4", "E7", "E9", "F", "B"]
+# Script entry points extend sys.path before importing repository modules.
+# I/Q is the established in-phase/quadrature notation in CSI processing.
+ignore = ["E402", "E741"]
+
+[lint.per-file-ignores]
+# CLI boundaries render the error for the user, then terminate intentionally.
+"src/python/espectre_cli/*.py" = ["B904"]
+"tools/benchmark_lightweight_candidate_pairs.py" = ["B904"]
+"tools/lib/dataset_metadata.py" = ["B904"]
+"tools/replay_lightweight_candidates.py" = ["B904"]

@@ -7,7 +7,6 @@ from array import array
 
 import pytest
 
-import lightweight_detector as lightweight_module
 from lightweight_detector import LightweightDetector
 import micro_espectre.lightweight_detector as micro_lightweight_module
 from micro_espectre.lightweight_detector import (
@@ -204,7 +203,7 @@ def test_direct_window_features_match_chronological_reference_with_missing_slots
     detector = LightweightDetector(window_size=8, enable_hampel=False)
     direct_values = [0.12, 0.31, None, 0.27, 0.49, 0.18, None, 0.42, 0.36]
     aggregate_values = [0.21, 0.44, None, 0.19, 0.38, 0.29, None, 0.47, 0.33]
-    for direct_value, aggregate_value in zip(direct_values, aggregate_values):
+    for direct_value, aggregate_value in zip(direct_values, aggregate_values, strict=True):
         if direct_value is None:
             detector._context.add_missing_slot()
             detector._aggregated_context.add_missing_slot()

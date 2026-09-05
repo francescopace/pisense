@@ -14,36 +14,26 @@ from pathlib import Path
 from dataclasses import dataclass
 from tools.lib.dataset_metadata import (
     admitted_dataset_role,
-    dataset_role,
-    measure_packet_interval_us,
     paired_dataset_role,
     resolve_entry_path,
 )
 from time import perf_counter
 from config import (
     DEFAULT_SUBCARRIERS,
-    ENABLE_HAMPEL_FILTER,
-    ENABLE_LOWPASS_FILTER,
     EVALUATION_INTERVAL_MS,
-    HAMPEL_THRESHOLD,
-    HAMPEL_WINDOW,
-    LOWPASS_CUTOFF,
     MOTION_OFF_HITS,
     MOTION_ON_HITS,
-    SEGMENTATION_WINDOW_SIZE_MS,
 )
 from detector_interface import MotionState
 from tools.lib.runtime_policy import (
     RuntimeMotionPolicy,
-    derive_detector_timing,
-    nominal_packet_interval_us,
+    derive_detector_timing,  # noqa: F401 - re-exported for training callers
 )
 from tools.lib.performance_report import (
     STRESS_TARGET_FP_RATE,
     STRESS_TARGET_RECALL,
     build_ml_replay_rows,
     load_or_compute_ml_replay_rows,
-    timing_cadence_for_window,
 )
 from tools.lib.occupancy_thinning import (
     OCCUPANCY_GATE_PERCENT,
@@ -1163,7 +1153,7 @@ def _load_exported_model_arrays():
     scale = np.asarray(module.FEATURE_SCALE, dtype=np.float32)
     matrices = exported_weight_matrices(module)
     layers = []
-    for idx, (weights, biases) in enumerate(zip(matrices, module.BIASES)):
+    for idx, (weights, biases) in enumerate(zip(matrices, module.BIASES, strict=True)):
         layers.append((
             weights,
             np.asarray(biases, dtype=np.float32),

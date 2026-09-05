@@ -93,7 +93,6 @@ def managed_component_root(path: Path) -> Path | None:
 
 
 def collect_packages(description: dict, frontend: str) -> dict[str, Package]:
-    project_path = Path(description["project_path"]).resolve()
     idf_path = Path(description["idf_path"]).resolve()
     project_version = os.environ.get("ESPECTRE_GIT_VERSION", description.get("project_version", "NOASSERTION"))
     if project_version == "1":

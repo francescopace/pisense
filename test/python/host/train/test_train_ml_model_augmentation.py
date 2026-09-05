@@ -1018,9 +1018,9 @@ def test_drift_augmentation_is_deterministic_and_count_preserving():
     assert len(second) == len(packets)
     assert any(
         np.any(first_packet["csi_data"] != original_packet["csi_data"])
-        for first_packet, original_packet in zip(first, packets)
+        for first_packet, original_packet in zip(first, packets, strict=True)
     )
-    for first_packet, second_packet in zip(first, second):
+    for first_packet, second_packet in zip(first, second, strict=True):
         np.testing.assert_array_equal(first_packet["csi_data"], second_packet["csi_data"])
 
 
@@ -1036,5 +1036,5 @@ def test_burst_loss_augmentation_is_deterministic_and_drops_packets():
 
     assert 0 < len(first) < len(packets)
     assert len(second) == len(first)
-    for first_packet, second_packet in zip(first, second):
+    for first_packet, second_packet in zip(first, second, strict=True):
         np.testing.assert_array_equal(first_packet["csi_data"], second_packet["csi_data"])

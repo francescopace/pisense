@@ -90,14 +90,14 @@ def occupancy_floor_slots(slots: int) -> Iterator[None]:
         performance_report,
         dataset_metadata,
     )
-    originals = tuple(getattr(module, "minimum_valid_slots") for module in modules)
+    originals = tuple(module.minimum_valid_slots for module in modules)
     for module in modules:
-        setattr(module, "minimum_valid_slots", _minimum_valid_slots)
+        module.minimum_valid_slots = _minimum_valid_slots
     try:
         yield
     finally:
-        for module, original in zip(modules, originals):
-            setattr(module, "minimum_valid_slots", original)
+        for module, original in zip(modules, originals, strict=True):
+            module.minimum_valid_slots = original
 
 
 def pair_seed(dataset_id: str, occupancy_percent: int) -> int:
