@@ -1,0 +1,80 @@
+name: Code Quality Reports
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [develop]
+  schedule:
+    - cron: '30 2 * * 6'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python quality (informational)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.14'
+      - name: Install pinned Ruff
+        run: python -m pip install "$(sed -n '/^ruff==/s/ .*//p' requirements.txt)"
+      - name: Run Ruff
+        continue-on-error: true
+        run: |
+          mkdir -p .cache/reports/quality
+          ruff check src/python tools test/python .github/scripts --output-format sarif --output-file .cache/reports/quality/ruff.sarif
+      - name: Summarize Python quality
+        if: always()
+        run: python .github/scripts/summarize_quality.py --name Ruff --report .cache/reports/quality/ruff.sarif
+      - name: Upload Python quality alerts
+        if: always() && hashFiles('.cache/reports/quality/ruff.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@24c7eb380a2dc368f2d129e4c65e51d172983a1e # v4
+        with:
+          sarif_file: .cache/reports/quality/ruff.sarif
+          category: quality/python
+
+  javascript:
+    name: JavaScript quality (informational)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: .github/quality/package-lock.json
+      - name: Install lint dependencies
+        run: npm --prefix .github/quality ci --ignore-scripts
+      - name: Run ESLint
+        continue-on-error: true
+        run: |
+          mkdir -p .cache/reports/quality
+          .github/quality/node_modules/.bin/eslint --config .github/quality/eslint.config.mjs docs/web/assets/js docs/web/*.mjs docs/web/headless-entry.js .github/quality/*.mjs --format ./.github/quality/node_modules/@microsoft/eslint-formatter-sarif/sarif.js --output-file .cache/reports/quality/eslint.sarif
+      - name: Summarize JavaScript quality
+        if: always()
+        run: python .github/scripts/summarize_quality.py --name ESLint --report .cache/reports/quality/eslint.sarif
+      - name: Upload JavaScript quality alerts
+        if: always() && hashFiles('.cache/reports/quality/eslint.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@24c7eb380a2dc368f2d129e4c65e51d172983a1e # v4
+        with:
+          sarif_file: .cache/reports/quality/eslint.sarif
+          category: quality/javascript

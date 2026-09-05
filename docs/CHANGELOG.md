@@ -11,7 +11,8 @@ All notable changes to this project will be documented in this file.
 - ESPHome firmware now builds against ESPHome `2026.8.2`. The matching host packages in `requirements.txt` are aligned with that pin.
 - Website dependencies are updated to Rollup `4.63.1`, `@rollup/plugin-commonjs` `29.0.3`, `@rollup/plugin-node-resolve` `16.0.3`, and `improv-wifi-serial-sdk` `2.8.1`, including the fix for CVE-2026-27606 in Rollup. Dependabot now checks those packages weekly on `develop`, and website CI audits the committed lockfile, including build dependencies, failing for known vulnerabilities rated low or higher.
 - Firmware builds use one Espressif-generated SBOM for distribution and dependency checks. Development audits report findings in job summaries and GitHub Code scanning; release gates block license violations, scanner failures, and applicable high, critical, or unscored CVEs.
-- Local caches and CI output are consolidated under `.cache/`, including firmware and SDK packages, audit and coverage reports, NPZ data, pytest, and Docker toolchain homes.
+- CI adds informational Ruff and ESLint quality reports, CodeQL analysis for JavaScript/TypeScript, and coverage summaries using the existing blocking thresholds. All integrations use features available for public repositories without GitHub Code Quality.
+- Local caches and CI output are consolidated under `.cache/`, including firmware and SDK packages, audit and coverage reports, NPZ data, Ruff, pytest, and Docker toolchain homes.
 
 ---
 

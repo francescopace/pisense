@@ -61,6 +61,23 @@ updates:
         patterns:
           - "*"
 
+  # CI-only JavaScript quality tooling
+  - package-ecosystem: "npm"
+    directory: "/.github/quality"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(ci)"
+    labels:
+      - "dependencies"
+    groups:
+      quality-dependencies:
+        patterns:
+          - "*"
+
   # GitHub Actions
   # Monitors: actions/checkout, actions/setup-python, actions/upload-artifact, etc.
   - package-ecosystem: "github-actions"

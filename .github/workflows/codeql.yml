@@ -29,6 +29,8 @@ jobs:
             build-mode: none
           - language: python
             build-mode: none
+          - language: javascript-typescript
+            build-mode: none
 
     steps:
       - name: Checkout repository
