@@ -1,6 +1,8 @@
 name: Docs, setup, or UX feedback
 description: Report unclear instructions, missing documentation, or setup problems
 title: "[DOCS] "
+labels:
+  - documentation
 body:
   - type: dropdown
     id: area
