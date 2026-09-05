@@ -431,6 +431,7 @@
     ]);
 
     function isSafeApiReferenceHref(value) {
+        // eslint-disable-next-line no-control-regex -- rejects control characters in untrusted URLs.
         if (!value || /[\u0000-\u0020]/.test(value)) return false;
         if (value.startsWith('#') || /^\/(?!\/)/.test(value)
             || value.startsWith('./') || value.startsWith('../')) return true;

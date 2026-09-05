@@ -20,7 +20,12 @@ def main() -> None:
         if not runs or any(not invocation.get('executionSuccessful', True)
                            for run in runs for invocation in run.get('invocations', [])):
             raise ValueError('analysis did not complete')
-        count = sum(len(run.get('results', [])) for run in runs)
+        count = sum(
+            1
+            for run in runs
+            for result in run.get('results', [])
+            if not result.get('suppressions')
+        )
         message = f'{args.name}: {count} quality findings. Informational; does not block merging.'
     except (OSError, ValueError, KeyError):
         message = f'{args.name}: analysis incomplete; inspect the scanner step. No clean result is available.'

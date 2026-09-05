@@ -1070,8 +1070,6 @@
     function flashSyncInstallActions() {
         const changing = flash.installChoice === 'change';
 
-        const canUpdate = Boolean(flash.detectedFrontend
-            && flashFrontendSupportsChip(flash.detectedFrontend, flash.detectedChip));
         const currentInstallDisabled = flashIsBusy() || !flash.detectedFrontend;
         flashSyncInstallMenu('current', currentInstallDisabled);
 
@@ -1577,6 +1575,7 @@
     }
 
     function flashSerialIdentity(input) {
+        // eslint-disable-next-line no-control-regex -- strips ANSI terminal escape sequences.
         input = input.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '');
         const project = input.match(/Project name:[ \t]*([^\r\n]+)[\r\n]/i)?.[1]?.trim() || '';
         const appVersion = input.match(/App version:[ \t]*([^\r\n]+)[\r\n]/i)?.[1]?.trim() || '';
@@ -1615,7 +1614,7 @@
     }
 
     function flashMatterCodes(input) {
-        const qr = input.match(/MATTER_QR=(MT:[A-Z0-9.\-]+)/);
+        const qr = input.match(/MATTER_QR=(MT:[A-Z0-9.-]+)/);
         const manual = input.match(/MATTER_MANUAL_CODE=([0-9]+)/);
         return qr && manual ? { qr: qr[1], manual: manual[1] } : null;
     }
@@ -1811,6 +1810,7 @@
 
     function flashStripAnsi(value) {
         return String(value).replace(
+            // eslint-disable-next-line no-control-regex -- strips ANSI terminal escape sequences.
             /\x1B(?:[@-_][0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g, ''
         );
     }

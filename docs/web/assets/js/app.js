@@ -137,7 +137,7 @@
     }
 
     function focusRouteAnchor(routeName, encodedTargetId) {
-        let targetId = '';
+        let targetId;
         try {
             targetId = decodeURIComponent(encodedTargetId);
         } catch (error) {
@@ -489,7 +489,7 @@
         } else if (href.startsWith('#') && href.length > 1) {
             const page = $(`[data-page="${route}"]`);
             const targetId = href.slice(1);
-            let decodedTargetId = '';
+            let decodedTargetId;
             try {
                 decodedTargetId = decodeURIComponent(targetId);
             } catch (error) {

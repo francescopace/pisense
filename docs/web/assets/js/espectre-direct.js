@@ -491,15 +491,16 @@
                 }
             } finally {
                 try { reader.releaseLock(); } catch (_error) { /* already released */ }
-                if (this.#eventController !== controller) return;
-                this.#eventController = null;
-                const expected = this.#closing || controller.signal.aborted;
-                this.#connected = false;
-                this.#compatible = false;
-                this.#capabilities = null;
-                for (const request of this.#requestControllers) request.abort('event stream ended');
-                this.#requestControllers.clear();
-                this.#emit('close', { code: 0, reason: expected ? 'client closed' : 'event stream ended', expected });
+                if (this.#eventController === controller) {
+                    this.#eventController = null;
+                    const expected = this.#closing || controller.signal.aborted;
+                    this.#connected = false;
+                    this.#compatible = false;
+                    this.#capabilities = null;
+                    for (const request of this.#requestControllers) request.abort('event stream ended');
+                    this.#requestControllers.clear();
+                    this.#emit('close', { code: 0, reason: expected ? 'client closed' : 'event stream ended', expected });
+                }
             }
         }
 
@@ -622,7 +623,7 @@
             }));
         }
 
-        close(_code = 0, _reason = 'client closed') {
+        close() {
             this.#closing = true;
             this.#connected = false;
             this.#compatible = false;

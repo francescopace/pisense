@@ -70,15 +70,15 @@
             return {
                 display: directTargetForEndpoint(endpoint), endpoint, deviceId: '', shortId: ''
             };
-        } catch (_error) {
+        } catch (error) {
             if (/^[a-z][a-z0-9+.-]*:\/\//i.test(input)
                 || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(input)) {
-                throw new Error('Enter a private device IP address from the same Wi-Fi network.');
+                throw new Error('Enter a private device IP address from the same Wi-Fi network.', { cause: error });
             }
             if (input.length <= 63 && [...input].every((character) => character >= ' ')) {
                 return { display: input, endpoint: '', deviceId: '', search: input, shortId: '' };
             }
-            throw new Error('Enter a device IP address, ID, or name.');
+            throw new Error('Enter a device IP address, ID, or name.', { cause: error });
         }
     }
 
@@ -629,7 +629,7 @@
             if (generation !== directDiscoveryGeneration) return null;
             const permissionState = await localNetworkAccessState();
             if (generation !== directDiscoveryGeneration) return null;
-            throw new Error(directDiscoveryFailureMessage(error, permissionState));
+            throw new Error(directDiscoveryFailureMessage(error, permissionState), { cause: error });
         } finally {
             if (generation === directDiscoveryGeneration) setDirectConnectionStatus();
         }
@@ -741,6 +741,7 @@
             if (conn.toolName === 'configure') markToolReady('info');
             if (pendingLiveDestination) completeLiveConnectionNavigation();
         } catch (error) {
+            let connectionError = error;
             if (directClient !== client
                     || (session && directResourceSessions.get(client) !== session)) return;
             client?.close();
@@ -762,15 +763,15 @@
                     }
                     return;
                 } catch (fallbackError) {
-                    error = fallbackError;
+                    connectionError = fallbackError;
                 }
             }
             track('tool_connection', {
                 ...connectionParams(), transport: 'direct_http', result: 'failure',
-                error_type: errorType(error)
+                error_type: errorType(connectionError)
             });
             const message = directConnectionErrorMessage(
-                error, normalizedEndpoint, await localNetworkAccessState());
+                connectionError, normalizedEndpoint, await localNetworkAccessState());
             setDirectConnectionHelp(message);
             toast(message);
         }

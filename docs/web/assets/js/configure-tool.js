@@ -543,7 +543,7 @@
             cfgValidationFailed('update_mqtt', 'MQTT needs a scheme, host, and port.');
             return;
         }
-        if (!['mqtt', 'mqtts'].includes(scheme) || /[\s/?#@\[\]]/.test(host)
+        if (!['mqtt', 'mqtts'].includes(scheme) || /[\s/?#@[\]]/.test(host)
                 || (host.includes(':') && !/^[0-9a-f:.]+$/i.test(host))) {
             cfgValidationFailed('update_mqtt', 'Enter a host or IP address without a scheme, port, path, or credentials.');
             return;

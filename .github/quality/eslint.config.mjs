@@ -30,7 +30,8 @@ export default [
     languageOptions: { sourceType: 'script', globals: { ...globals.browser, ...sharedGlobals } },
     rules: {
       ...js.configs.recommended.rules,
-      'no-unused-vars': ['error', { vars: 'local' }],
+      // Cleanup handlers routinely catch and intentionally discard close/cancel errors.
+      'no-unused-vars': ['error', { vars: 'local', caughtErrors: 'none' }],
       'no-redeclare': ['error', { builtinGlobals: false }],
     },
   },

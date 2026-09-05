@@ -1239,7 +1239,6 @@
         if (rawCsi.state === 'stopping') return rawCsi.stopPromise;
         rawCsiFinishTracking(rawCsi.analyticsReady ? 'stopped' : 'cancelled', null, reason);
         const stopGeneration = ++rawCsi.generation;
-        const client = rawCsi.sessionClient;
         clearInterval(rawCsi.demoTimer);
         rawCsi.demoTimer = null;
         rawCsi.demoFresh = 0;
