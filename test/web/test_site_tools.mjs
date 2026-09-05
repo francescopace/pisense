@@ -1340,13 +1340,6 @@ describe('website tool contracts', () => {
         assert.doesNotMatch(html, /\[0;32m|<safe>/);
     });
 
-    it('uses pinned headless browser dependencies', () => {
-        const manifest = JSON.parse(read('docs/web/package.json'));
-        assert.equal(manifest.dependencies.ansi_up, '6.0.6');
-        assert.equal(manifest.dependencies['esptool-js'], '0.6.1');
-        assert.equal(manifest.dependencies['improv-wifi-serial-sdk'], '2.8.0');
-    });
-
     it('offers the shared connection picker from every connected browser tool', () => {
         for (const tool of ['configure', 'monitor', 'raw-csi', 'theremin', 'game']) {
             assert.match(

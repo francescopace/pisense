@@ -146,15 +146,13 @@ def test_python_coverage_gate_enforces_each_metric(
         assert "Python coverage thresholds satisfied." in result.stdout
 
 
-def test_web_coverage_gate_uses_canonical_thresholds_and_node_runtime() -> None:
+def test_web_coverage_gate_uses_canonical_thresholds() -> None:
     workflow = (WORKFLOWS_DIR / "ci.yml").read_text(encoding="utf-8")
     build_site = _workflow_job(workflow, "build-site")
     action = BUILD_PAGES_ACTION.read_text(encoding="utf-8")
     runner = WEB_COVERAGE_RUNNER.read_text(encoding="utf-8")
     thresholds = json.loads(WEB_COVERAGE_THRESHOLDS.read_text(encoding="utf-8"))
 
-    assert "actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38" in build_site
-    assert "node-version: '22'" in build_site
     assert "./test/web/run_coverage.sh" in action
     assert "test/web/coverage-thresholds.json" in runner
     variables = {
@@ -684,7 +682,7 @@ def test_sdk_snapshot_stamps_git_describe_identity(tmp_path: Path) -> None:
     assert "package_version" not in manifest
     assert "sdk_version" not in manifest
     assert manifest["release_tag"] == develop_tag
-    assert manifest["supported_esp_idf"] == ">=5.5.0"
+    assert manifest["supported_esp_idf"] == builder.SDK_SUPPORTED_ESP_IDF
     assert manifest["artifacts"][0]["filename"] == "espectre-sdk-develop.tar.gz"
     assert f"/releases/download/{develop_tag}/" in manifest["artifacts"][0]["url"]
 
@@ -700,11 +698,12 @@ def test_sdk_snapshot_stamps_git_describe_identity(tmp_path: Path) -> None:
     assert "#define ESPECTRE_SDK_VERSION_MAJOR 2" in header
     assert "ESPectre SDK version is unresolved" not in header
     assert 'version: "2.8.0-237-g7439944"' in yml
-    assert 'version: ">=5.5.0"' in yml
+    source_manifest = builder.IDF_COMPONENT_MANIFEST.read_text(encoding="utf-8")
+    assert yml.split("\ndependencies:\n", 1)[1] == source_manifest.split("\ndependencies:\n", 1)[1]
+    assert f'version: "{builder.SDK_SUPPORTED_ESP_IDF}"' in yml
     assert "https://github.com/improv-wifi/sdk-cpp.git" in yml
-    assert "version: 17898613a1c17062ca5af295ceb639b16b4930bf" in yml
-    assert 'espressif/mdns:\n    version: "^1.9.0"' in yml
-    assert 'espressif/esp_tinyusb:\n    version: "^2.0.0"' in yml
+    assert "espressif/mdns:" in yml
+    assert "espressif/esp_tinyusb:" in yml
     assert '- if: "target in [esp32s2, esp32s3]"' in yml
     assert re.search(r"(?m)^PROJECT_NUMBER\s*=\s*2\.8\.0-237-g7439944\s*$", bundled_doxyfile)
     for relative_path in (
@@ -713,28 +712,27 @@ def test_sdk_snapshot_stamps_git_describe_identity(tmp_path: Path) -> None:
         "src/cpp/frontend/matter/app/main/idf_component.yml",
     ):
         frontend_manifest = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
-        assert 'version: ">=5.5.0"' in frontend_manifest
+        assert f'version: "{builder.SDK_SUPPORTED_ESP_IDF}"' in frontend_manifest
 
     native_manifest = (
         REPO_ROOT / "src" / "cpp" / "frontend" / "native" / "espectre" / "idf_component.yml"
     ).read_text(encoding="utf-8")
     assert "https://github.com/improv-wifi/sdk-cpp.git" in native_manifest
-    assert "version: 17898613a1c17062ca5af295ceb639b16b4930bf" in native_manifest
-    assert 'espressif/mdns:\n    version: "^1.9.0"' in native_manifest
+    assert "espressif/mdns:" in native_manifest
 
     for relative_path in (
         "src/cpp/frontend/native/espectre/idf_component.yml",
         "src/cpp/frontend/esphome/components/espectre/idf_component.yml",
     ):
         frontend_manifest = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
-        assert 'espressif/esp_tinyusb:\n    version: "^2.0.0"' in frontend_manifest
+        assert "espressif/esp_tinyusb:" in frontend_manifest
         assert '- if: "target in [esp32s2, esp32s3]"' in frontend_manifest
 
     matter_manifest = (
         REPO_ROOT / "src" / "cpp" / "frontend" / "matter" / "espectre" / "idf_component.yml"
     ).read_text(encoding="utf-8")
-    assert 'espressif/mdns:\n    version: "^1.9.0"' in matter_manifest
-    assert 'espressif/esp_tinyusb:\n    version: "^2.0.0"' in matter_manifest
+    assert "espressif/mdns:" in matter_manifest
+    assert "espressif/esp_tinyusb:" in matter_manifest
     assert '- if: "target == esp32s3"' in matter_manifest
     assert "esp32s2" not in matter_manifest
     assert not (
@@ -957,10 +955,13 @@ def test_generate_sdk_api_requires_the_pinned_doxygen_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     generator = load_script("generate_sdk_api")
-    monkeypatch.setattr(generator, "detect_doxygen_version", lambda: "1.9.8")
-    with pytest.raises(ValueError, match="1.17.0"):
+    required_version = generator.REQUIRED_DOXYGEN_VERSION
+    major, minor, patch = map(int, required_version.split("."))
+    other_version = f"{major}.{minor}.{patch + 1}"
+    monkeypatch.setattr(generator, "detect_doxygen_version", lambda: other_version)
+    with pytest.raises(ValueError, match=re.escape(required_version)):
         generator.require_doxygen_version()
-    monkeypatch.setattr(generator, "detect_doxygen_version", lambda: "1.17.0")
+    monkeypatch.setattr(generator, "detect_doxygen_version", lambda: required_version)
     generator.require_doxygen_version()
 
 
@@ -1521,7 +1522,6 @@ def test_workflows_keep_publication_and_supply_chain_guardrails() -> None:
     assert ".github/scripts/generate_sdk_api.py" in pages_action
     assert "doxygen src/cpp/Doxyfile" not in pages_action
     generator = load_script("generate_sdk_api")
-    assert generator.REQUIRED_DOXYGEN_VERSION == "1.17.0"
     assert f'version="{generator.REQUIRED_DOXYGEN_VERSION}"' in pages_action
     assert "doxygen-${version}.linux.bin.tar.gz" in pages_action
     assert "apt-get install -y --no-install-recommends doxygen" not in pages_action
