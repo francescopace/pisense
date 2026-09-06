@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import re
@@ -525,24 +526,122 @@ def test_firmware_vulnerability_gate_does_not_accept_incomplete_scans(
         assert len(firmware_auditor.check_vulnerabilities(sbom_path, 10)["findings"]) == findings
 
 
-@pytest.mark.parametrize("policy", ["report", "release"])
+def test_firmware_audit_union_deduplicates_shared_vulnerability_inputs(firmware_auditor, tmp_path):
+    shared_dependency = {
+        "SPDXID": "SPDXRef-COMPONENT-cjson",
+        "name": "cJSON",
+        "versionInfo": "1.7.19",
+        "externalRefs": [{
+            "referenceCategory": "SECURITY",
+            "referenceType": "cpe23Type",
+            "referenceLocator": "cpe:2.3:a:davegamble:cjson:1.7.19:*:*:*:*:*:*:*",
+        }],
+    }
+
+    def sbom(target_dependency: dict) -> dict:
+        return {
+            "spdxVersion": "SPDX-2.2",
+            "creationInfo": {"creators": ["Tool: esp-idf-sbom"]},
+            "packages": [
+                {"SPDXID": "SPDXRef-Package-Firmware", "name": "firmware"},
+                shared_dependency,
+                target_dependency,
+            ],
+            "relationships": [
+                {"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": "SPDXRef-Package-Firmware"},
+                {"spdxElementId": "SPDXRef-Package-Firmware", "relationshipType": "DEPENDS_ON", "relatedSpdxElement": "SPDXRef-COMPONENT-cjson"},
+                {"spdxElementId": "SPDXRef-Package-Firmware", "relationshipType": "DEPENDS_ON", "relatedSpdxElement": target_dependency["SPDXID"]},
+            ],
+        }
+
+    c3_dependency = {
+        "SPDXID": "SPDXRef-COMPONENT-c3",
+        "name": "target-c3",
+        "externalRefs": [{
+            "referenceCategory": "SECURITY",
+            "referenceType": "cpe23Type",
+            "referenceLocator": "cpe:2.3:o:espressif:esp32-c3:*:*:*:*:*:*:*:*",
+        }],
+    }
+    c6_dependency = {**c3_dependency, "SPDXID": "SPDXRef-COMPONENT-c6", "name": "target-c6"}
+    union = firmware_auditor.build_vulnerability_union("matter", [sbom(c3_dependency), sbom(c6_dependency)])
+
+    assert union["documentDescribes"] == ["SPDXRef-Package-Audit-Union"]
+    assert [package["name"] for package in union["packages"]].count("cJSON") == 1
+    assert {package["name"] for package in union["packages"]} >= {"target-c3", "target-c6"}
+    union_path = tmp_path / "union.spdx.json"
+    union_path.write_text(json.dumps(union), encoding="utf-8")
+    from esp_idf_sbom.libsbom import sbom as idf_sbom
+
+    scanned_names = {package.package_name for package in idf_sbom.app_packages(idf_sbom.load(str(union_path)))}
+    assert {"cJSON", "target-c3", "target-c6"} <= scanned_names
+
+
+def test_firmware_audit_reports_missing_target_without_uploadable_sarif(
+    firmware_auditor, tmp_path, monkeypatch
+):
+    sbom = {
+        "spdxVersion": "SPDX-2.2",
+        "creationInfo": {"creators": ["Tool: esp-idf-sbom"]},
+        "packages": [{"SPDXID": "root", "name": "firmware", "licenseDeclared": "MIT"}],
+        "relationships": [{
+            "spdxElementId": "SPDXRef-DOCUMENT",
+            "relationshipType": "DESCRIBES",
+            "relatedSpdxElement": "root",
+        }],
+    }
+    for target in ("ESP32", "ESP32-C6"):
+        (tmp_path / f"{target}.spdx.json").write_text(json.dumps(sbom), encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "audit", "--frontend", "native", "--sbom", str(tmp_path / "ESP32.spdx.json"),
+            "--sbom", str(tmp_path / "ESP32-C6.spdx.json"), "--expected-target", "ESP32",
+            "--expected-target", "ESP32-C3", "--expected-target", "ESP32-C6",
+            "--output-dir", str(tmp_path / "report"),
+        ],
+    )
+    monkeypatch.setattr(firmware_auditor, "check_licenses", lambda *args: ([], []))
+    monkeypatch.setattr(firmware_auditor, "check_vulnerabilities", lambda *args: {"findings": [], "skipped": 0})
+
+    assert firmware_auditor.main() == 2
+    summary = (tmp_path / "report" / "summary.md").read_text(encoding="utf-8")
+    assert "Status: **incomplete**" in summary
+    assert "Target coverage: 2/3" in summary
+    assert "Missing audit inputs: ESP32-C3" in summary
+    assert not (tmp_path / "report" / "results.sarif").exists()
+
+
 @pytest.mark.parametrize("violation,findings,scanner_error,expected", [
     (False, [], False, 0),
     (True, [], False, 1),
     (False, [{"pkg_name": "idf", "cve_id": "CVE-2026-1234", "vulnerable": "YES",
-              "cvss_base_severity": "HIGH"}], False, 1),
+              "cvss_base_severity": "HIGH"}], False, 0),
     (False, [{"pkg_name": "idf", "cve_id": "CVE-2026-1234", "vulnerable": "MAYBE",
               "cvss_base_severity": "HIGH"}], False, 0),
     (False, [{"pkg_name": "idf", "cve_id": "CVE-2026-1234", "vulnerable": "YES",
               "cvss_base_severity": "LOW"}], False, 0),
     (False, [], True, 2),
 ])
-def test_firmware_audit_policy_and_report_preserve_scan_status(
-    firmware_auditor, tmp_path, monkeypatch, violation, findings, scanner_error, expected, policy
+def test_firmware_license_gate_and_security_report_preserve_scan_status(
+    firmware_auditor, tmp_path, monkeypatch, violation, findings, scanner_error, expected
 ):
     path = tmp_path / "sbom.json"
-    path.write_text("{}")
-    monkeypatch.setattr(sys, "argv", ["audit", "--frontend", "native", "--sbom", str(path), "--policy", policy])
+    path.write_text(
+        json.dumps({
+            "spdxVersion": "SPDX-2.2",
+            "creationInfo": {"creators": ["Tool: esp-idf-sbom"]},
+            "packages": [{"SPDXID": "root", "name": "firmware"}],
+            "relationships": [{
+                "spdxElementId": "SPDXRef-DOCUMENT",
+                "relationshipType": "DESCRIBES",
+                "relatedSpdxElement": "root",
+            }],
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys, "argv", ["audit", "--frontend", "native", "--sbom", str(path)])
     monkeypatch.setattr(firmware_auditor, "check_licenses", lambda *args: (["GPL"] if violation else [], []))
 
     def scan(*args):
@@ -551,11 +650,13 @@ def test_firmware_audit_policy_and_report_preserve_scan_status(
         return {"findings": findings, "skipped": 0}
 
     monkeypatch.setattr(firmware_auditor, "check_vulnerabilities", scan)
-    assert firmware_auditor.main() == (expected if policy == "release" else 0)
+    assert firmware_auditor.main() == expected
     report_path = tmp_path / "audit/native/results.sarif"
     assert report_path.exists() is not scanner_error
     summary = (tmp_path / "audit/native/summary.md").read_text()
     assert ("**incomplete**" in summary) is scanner_error
+    assert "CVE-2026-1234" not in summary
+    assert "Vulnerability findings:" not in summary
     if not scanner_error:
         report = json.loads(report_path.read_text())
         assert len(report["runs"][0]["results"]) == len(findings)
@@ -620,3 +721,39 @@ def test_sbom_enrichment_preserves_third_party_terms_and_frontend_licensing(tmp_
 def test_license_file_fallback_identifies_restrictive_terms(tmp_path, text, expected):
     (tmp_path / "LICENSE").write_text(text)
     assert load_compliance_module().infer_license(tmp_path) == expected
+
+
+@pytest.mark.parametrize("case", ["reviewed", "changed", "notice", "outside", "declared", "unmapped"])
+def test_nested_license_enrichment_requires_reviewed_package_text(tmp_path, monkeypatch, case):
+    module = load_compliance_module()
+    reviewed = b"Complete reviewed license text\n"
+    digest = hashlib.sha256(reviewed).hexdigest()
+    monkeypatch.setattr(module, "REVIEWED_LICENSE_TEXTS", {digest: "MIT"})
+    root = tmp_path / "cjson"
+    (root / "cJSON").mkdir(parents=True)
+    source = root / "cJSON" / "LICENSE"
+    if case == "outside":
+        outside = tmp_path / "LICENSE"
+        outside.write_bytes(reviewed)
+        source.symlink_to(outside)
+    else:
+        if case == "notice":
+            source = source.with_name("NOTICE")
+        source.write_bytes(reviewed + (b"Additional restriction\n" if case == "changed" else b""))
+    package = {
+        "SPDXID": "SPDXRef-VIRTPACKAGE-espressif--cjson-sbom-cJSON.yml",
+        "name": "cJSON", "licenseDeclared": "GPL-3.0-only" if case == "declared" else "NOASSERTION",
+        "licenseConcluded": "GPL-3.0-only", "comment": "cve-exclude-list: []",
+        "licenseComments": "Upstream evidence.",
+    }
+    if case == "unmapped":
+        package["SPDXID"] = "SPDXRef-VIRTPACKAGE-other-cjson"
+    sbom = {"packages": [package]}
+    module.enrich_subpackage_licenses(sbom, {"SPDXRef-COMPONENT-espressif--cjson": root})
+    assert package["licenseDeclared"] == (
+        "MIT" if case == "reviewed" else "GPL-3.0-only" if case == "declared" else "NOASSERTION"
+    )
+    assert package["licenseConcluded"] == "GPL-3.0-only"
+    assert package["comment"] == "cve-exclude-list: []"
+    assert package["licenseComments"].startswith("Upstream evidence.")
+    assert (digest in package["licenseComments"]) == (case == "reviewed")

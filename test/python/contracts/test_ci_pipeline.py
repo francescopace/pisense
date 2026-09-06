@@ -93,6 +93,40 @@ def test_ci_chip_matrices_follow_production_registries() -> None:
     assert "if: always() && hashFiles('.cache/reports/coverage/coverage-python.json') != ''" in python_job
 
 
+def test_firmware_audits_aggregate_target_sboms_by_frontend() -> None:
+    ci_workflow = (WORKFLOWS_DIR / "ci.yml").read_text(encoding="utf-8")
+    release_workflow = (WORKFLOWS_DIR / "release.yml").read_text(encoding="utf-8")
+    for frontend, job_name in (("esphome", "build-esphome"), ("matter", "build-matter"), ("native", "build-native")):
+        audit_job = _workflow_job(ci_workflow, f"audit-{frontend}")
+        build_job = _workflow_job(ci_workflow, job_name)
+        release_audit_job = _workflow_job(release_workflow, f"audit-{frontend}")
+        release_build_job = _workflow_job(release_workflow, job_name)
+        expected_targets = _workflow_chip_matrix(ci_workflow, job_name)
+
+        assert f"needs: {job_name}" in audit_job
+        assert "if: always()" in audit_job
+        assert f"pattern: audit-firmware-{frontend}-*" in audit_job
+        assert f"category: firmware/{frontend}" in audit_job
+        assert f"category: firmware/{frontend}" in release_audit_job
+        assert "security-events: write" in release_audit_job
+        assert "continue-on-error: true" not in audit_job
+        assert "continue-on-error: true" not in release_audit_job
+        assert "audit_firmware_dependencies.py" not in build_job
+        assert "name: audit-firmware-" + frontend + "-${{ matrix.chip }}" in build_job
+
+        assert f"needs: {job_name}" in release_audit_job
+        assert "if: always()" in release_audit_job
+        assert f"pattern: audit-firmware-{frontend}-*" in release_audit_job
+        assert "audit_firmware_dependencies.py" not in release_build_job
+        for target in expected_targets:
+            assert f"--expected-target {target}" in audit_job
+            assert f"--expected-target {target}" in release_audit_job
+
+    release_job = _workflow_job(release_workflow, "release")
+    for audit_job in ("audit-esphome", "audit-matter", "audit-native"):
+        assert audit_job in release_job
+
+
 def test_python_coverage_gate_has_fixed_thresholds() -> None:
     thresholds = json.loads(PYTHON_COVERAGE_THRESHOLDS.read_text(encoding="utf-8"))
 

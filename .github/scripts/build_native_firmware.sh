@@ -26,7 +26,6 @@ mkdir -p "${NATIVE_HOME}" "${NATIVE_ROOT_MANAGED_COMPONENTS}" "${OUTPUT_DIR}"
 docker run --rm \
   --user "$(id -u):$(id -g)" \
   -e HOME="/work/.cache/build/native-home" \
-  -e ESPECTRE_AUDIT_POLICY="${ESPECTRE_AUDIT_POLICY:-report}" \
   -e ESPECTRE_GIT_VERSION="${ESPECTRE_GIT_VERSION}" \
   -e SDKCONFIG_DEFAULTS="${NATIVE_SDKCONFIG_DEFAULTS}" \
   -e NATIVE_OTA_CHANNEL="${NATIVE_OTA_CHANNEL}" \
@@ -86,8 +85,4 @@ docker run --rm \
         --firmware \"\${NATIVE_OTA_OUTPUT}\" \
         --output-dir \"\$(dirname \"\${NATIVE_OTA_OUTPUT}\")\"
     fi
-    python /work/.github/scripts/audit_firmware_dependencies.py \
-      --frontend native \
-      --sbom \"\${NATIVE_OUTPUT%.bin}-sbom.spdx.json\" \
-      --output-dir /work/.cache/reports/firmware/native
   "

@@ -162,7 +162,6 @@ jobs:
   build-esphome:
     permissions:
       contents: read
-      security-events: write
     name: Build ESPHome ${{ matrix.chip }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -243,30 +242,22 @@ jobs:
               --firmware "${FIRMWARE}" \
               --output-dir .cache/firmware
           done
-          # Factory and OTA images share the same linked dependency graph.
-          for FIRMWARE in .cache/firmware/espectre-esphome-*.bin; do
-            case "${FIRMWARE}" in *-ota.bin) continue ;; esac
-            python .github/scripts/audit_firmware_dependencies.py \
-              --frontend esphome --sbom "${FIRMWARE%.bin}-sbom.spdx.json" \
-              --output-dir .cache/reports/firmware/esphome
-          done
-
-      - name: Summarize firmware audit
-        if: always()
+      - name: Stage ESPHome firmware audit input
         run: |
-          if [ -f .cache/reports/firmware/esphome/summary.md ]; then
-            cat .cache/reports/firmware/esphome/summary.md >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo 'Firmware dependency audit did not run or did not produce a report.' >> "$GITHUB_STEP_SUMMARY"
-          fi
+          mkdir -p .cache/audit-input
+          for SBOM in .cache/firmware/espectre-esphome-*-sbom.spdx.json; do
+            case "${SBOM}" in *-ota-sbom.spdx.json) continue ;; esac
+            cp "${SBOM}" ".cache/audit-input/${{ matrix.chip }}.spdx.json"
+          done
+          test -f ".cache/audit-input/${{ matrix.chip }}.spdx.json"
 
-      - name: Upload firmware vulnerability alerts
-        if: always() && hashFiles('.cache/reports/firmware/esphome/results.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-        continue-on-error: true
-        uses: github/codeql-action/upload-sarif@24c7eb380a2dc368f2d129e4c65e51d172983a1e # v4
+      - name: Upload ESPHome firmware audit input
+        if: success()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          sarif_file: .cache/reports/firmware/esphome/results.sarif
-          category: firmware/esphome/${{ matrix.chip }}
+          name: audit-firmware-esphome-${{ matrix.chip }}
+          path: .cache/audit-input/${{ matrix.chip }}.spdx.json
+          retention-days: 1
 
       - name: Upload ESPHome firmware artifact
         if: success() && github.event_name == 'push'
@@ -282,7 +273,6 @@ jobs:
   build-matter:
     permissions:
       contents: read
-      security-events: write
     name: Build Matter ${{ matrix.chip }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -340,22 +330,18 @@ jobs:
           MATTER_OUTPUT: ${{ github.workspace }}/.cache/firmware/espectre-matter-${{ steps.matter-names.outputs.prefix }}-${{ matrix.target }}.bin
           MATTER_SDKCONFIG_DEFAULTS: ${{ matrix.sdkconfig_defaults || '' }}
 
-      - name: Summarize firmware audit
-        if: always()
+      - name: Stage Matter firmware audit input
         run: |
-          if [ -f .cache/reports/firmware/matter/summary.md ]; then
-            cat .cache/reports/firmware/matter/summary.md >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo 'Firmware dependency audit did not run or did not produce a report.' >> "$GITHUB_STEP_SUMMARY"
-          fi
+          mkdir -p .cache/audit-input
+          cp .cache/firmware/espectre-matter-*-sbom.spdx.json ".cache/audit-input/${{ matrix.chip }}.spdx.json"
 
-      - name: Upload firmware vulnerability alerts
-        if: always() && hashFiles('.cache/reports/firmware/matter/results.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-        continue-on-error: true
-        uses: github/codeql-action/upload-sarif@24c7eb380a2dc368f2d129e4c65e51d172983a1e # v4
+      - name: Upload Matter firmware audit input
+        if: success()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          sarif_file: .cache/reports/firmware/matter/results.sarif
-          category: firmware/matter/${{ matrix.chip }}
+          name: audit-firmware-matter-${{ matrix.chip }}
+          path: .cache/audit-input/${{ matrix.chip }}.spdx.json
+          retention-days: 1
 
       - name: Upload Matter firmware artifact
         if: success() && github.event_name == 'push'
@@ -372,7 +358,6 @@ jobs:
   build-native:
     permissions:
       contents: read
-      security-events: write
     name: Build Native ${{ matrix.chip }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -433,22 +418,22 @@ jobs:
           NATIVE_OTA_CHANNEL: ${{ steps.native-names.outputs.ota_channel }}
           NATIVE_SDKCONFIG_DEFAULTS: ${{ matrix.sdkconfig_defaults || '' }}
 
-      - name: Summarize firmware audit
-        if: always()
+      - name: Stage native firmware audit input
         run: |
-          if [ -f .cache/reports/firmware/native/summary.md ]; then
-            cat .cache/reports/firmware/native/summary.md >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo 'Firmware dependency audit did not run or did not produce a report.' >> "$GITHUB_STEP_SUMMARY"
-          fi
+          mkdir -p .cache/audit-input
+          for SBOM in .cache/firmware/espectre-native-*-sbom.spdx.json; do
+            case "${SBOM}" in *-ota-sbom.spdx.json) continue ;; esac
+            cp "${SBOM}" ".cache/audit-input/${{ matrix.chip }}.spdx.json"
+          done
+          test -f ".cache/audit-input/${{ matrix.chip }}.spdx.json"
 
-      - name: Upload firmware vulnerability alerts
-        if: always() && hashFiles('.cache/reports/firmware/native/results.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-        continue-on-error: true
-        uses: github/codeql-action/upload-sarif@24c7eb380a2dc368f2d129e4c65e51d172983a1e # v4
+      - name: Upload native firmware audit input
+        if: success()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          sarif_file: .cache/reports/firmware/native/results.sarif
-          category: firmware/native/${{ matrix.chip }}
+          name: audit-firmware-native-${{ matrix.chip }}
+          path: .cache/audit-input/${{ matrix.chip }}.spdx.json
+          retention-days: 1
 
       - name: Upload native firmware artifact
         if: success() && github.event_name == 'push'
@@ -461,6 +446,182 @@ jobs:
             .cache/firmware/espectre-native-develop*
             .cache/firmware/espectre-native-ci*
           retention-days: 7
+
+  audit-esphome:
+    name: Audit ESPHome firmware dependencies
+    needs: build-esphome
+    if: always()
+    permissions:
+      contents: read
+      security-events: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.14'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install audit dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Download firmware audit inputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: audit-firmware-esphome-*
+          path: .cache/audit-input
+          merge-multiple: true
+
+      - name: Audit ESPHome firmware dependencies
+        run: |
+          python .github/scripts/audit_firmware_dependencies.py \
+            --frontend esphome \
+            --sbom .cache/audit-input/*.spdx.json \
+            --expected-target ESP32 \
+            --expected-target ESP32-S2 \
+            --expected-target ESP32-S3 \
+            --expected-target ESP32-C3 \
+            --expected-target ESP32-C5 \
+            --expected-target ESP32-C6 \
+            --output-dir .cache/reports/firmware/esphome
+
+      - name: Summarize firmware audit
+        if: always()
+        run: |
+          if [ -f .cache/reports/firmware/esphome/summary.md ]; then
+            cat .cache/reports/firmware/esphome/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Firmware dependency audit did not produce a report.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload firmware vulnerability alerts
+        if: always() && hashFiles('.cache/reports/firmware/esphome/results.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@24c7eb380a2dc368f2d129e4c65e51d172983a1e # v4
+        with:
+          sarif_file: .cache/reports/firmware/esphome/results.sarif
+          category: firmware/esphome
+
+  audit-matter:
+    name: Audit Matter firmware dependencies
+    needs: build-matter
+    if: always()
+    permissions:
+      contents: read
+      security-events: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.14'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install audit dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Download firmware audit inputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: audit-firmware-matter-*
+          path: .cache/audit-input
+          merge-multiple: true
+
+      - name: Audit Matter firmware dependencies
+        run: |
+          python .github/scripts/audit_firmware_dependencies.py \
+            --frontend matter \
+            --sbom .cache/audit-input/*.spdx.json \
+            --expected-target ESP32 \
+            --expected-target ESP32-C3 \
+            --expected-target ESP32-C5 \
+            --expected-target ESP32-C6 \
+            --expected-target ESP32-S3 \
+            --output-dir .cache/reports/firmware/matter
+
+      - name: Summarize firmware audit
+        if: always()
+        run: |
+          if [ -f .cache/reports/firmware/matter/summary.md ]; then
+            cat .cache/reports/firmware/matter/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Firmware dependency audit did not produce a report.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload firmware vulnerability alerts
+        if: always() && hashFiles('.cache/reports/firmware/matter/results.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@24c7eb380a2dc368f2d129e4c65e51d172983a1e # v4
+        with:
+          sarif_file: .cache/reports/firmware/matter/results.sarif
+          category: firmware/matter
+
+  audit-native:
+    name: Audit Native firmware dependencies
+    needs: build-native
+    if: always()
+    permissions:
+      contents: read
+      security-events: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.14'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install audit dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Download firmware audit inputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: audit-firmware-native-*
+          path: .cache/audit-input
+          merge-multiple: true
+
+      - name: Audit Native firmware dependencies
+        run: |
+          python .github/scripts/audit_firmware_dependencies.py \
+            --frontend native \
+            --sbom .cache/audit-input/*.spdx.json \
+            --expected-target ESP32 \
+            --expected-target ESP32-C3 \
+            --expected-target ESP32-C5 \
+            --expected-target ESP32-C6 \
+            --expected-target ESP32-S2 \
+            --expected-target ESP32-S3 \
+            --output-dir .cache/reports/firmware/native
+
+      - name: Summarize firmware audit
+        if: always()
+        run: |
+          if [ -f .cache/reports/firmware/native/summary.md ]; then
+            cat .cache/reports/firmware/native/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Firmware dependency audit did not produce a report.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload firmware vulnerability alerts
+        if: always() && hashFiles('.cache/reports/firmware/native/results.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@24c7eb380a2dc368f2d129e4c65e51d172983a1e # v4
+        with:
+          sarif_file: .cache/reports/firmware/native/results.sarif
+          category: firmware/native
 
   build-sdk:
     name: Build SDK Package

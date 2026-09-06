@@ -19,6 +19,8 @@ The upstream Matter [NOTICE](src/cpp/frontend/matter/third_party/esp_matter/NOTI
 
 ESP-IDF and esp-matter contain additional permissively licensed components. Each per-build `*-third-party-licenses.zip` contains the license files collected from the linked component set, while the adjacent `*-sbom.spdx.json` records the firmware checksum and package and component inventory.
 
+Firmware audits fail CI and release checks for incompatible license expressions or incomplete scans. Unidentified licenses remain review warnings. CVE findings are uploaded to GitHub Security through SARIF and do not block firmware builds, snapshots, or releases; triage and dismissals are managed in GitHub Code scanning. A failed SARIF upload fails its CI or release audit job. The CI summary contains license findings only. Snapshot publication still requires a successful source CI run.
+
 ## Repository-vendored source
 
 | Material | Location | License |

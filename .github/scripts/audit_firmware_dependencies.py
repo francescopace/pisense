@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 # Commercial licensing available under separate agreement; see LICENSING.md.
-"""Report firmware dependency findings, with an optional release gate."""
+"""Enforce firmware licenses and publish vulnerability findings as SARIF."""
 
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
-import os
 import json
 import subprocess
 import sys
@@ -103,8 +103,99 @@ def check_vulnerabilities(sbom_path: Path, timeout: int) -> dict:
         })}
 
 
+def vulnerability_identity(package: dict) -> str:
+    """Return the SPDX fields that affect an ESP-IDF vulnerability lookup."""
+    references = [
+        {
+            "referenceCategory": reference.get("referenceCategory", ""),
+            "referenceType": reference.get("referenceType", ""),
+            "referenceLocator": reference.get("referenceLocator", ""),
+        }
+        for reference in package.get("externalRefs", [])
+        if (reference.get("referenceCategory") == "SECURITY"
+            and reference.get("referenceType") == "cpe23Type")
+        or reference.get("referenceType") in {"purl", "repository"}
+    ]
+    return json.dumps(
+        {
+            "name": package.get("name", ""),
+            "versionInfo": package.get("versionInfo", ""),
+            "supplier": package.get("supplier", ""),
+            "originator": package.get("originator", ""),
+            "downloadLocation": package.get("downloadLocation", ""),
+            "summary": package.get("summary", ""),
+            "comment": package.get("comment", ""),
+            "externalRefs": sorted(references, key=lambda reference: json.dumps(reference, sort_keys=True)),
+        },
+        sort_keys=True,
+    )
+
+
+def build_vulnerability_union(frontend: str, sboms: list[dict]) -> dict:
+    """Merge target SBOM dependency graphs while deduplicating scan inputs."""
+    if not sboms:
+        raise ValueError("No SBOMs are available for the vulnerability audit")
+
+    document = copy.deepcopy(sboms[0])
+    union_root = "SPDXRef-Package-Audit-Union"
+    packages = [{
+        "SPDXID": union_root,
+        "name": f"ESPectre {frontend} firmware audit union",
+        "versionInfo": "NOASSERTION",
+        "downloadLocation": "NOASSERTION",
+        "filesAnalyzed": False,
+        "licenseDeclared": "NOASSERTION",
+        "licenseConcluded": "NOASSERTION",
+        "copyrightText": "NOASSERTION",
+    }]
+    package_ids: dict[str, str] = {}
+    relationships: set[tuple[str, str]] = set()
+    roots: set[str] = set()
+
+    for sbom in sboms:
+        source_ids: dict[str, str] = {}
+        for package in sbom["packages"]:
+            identity = vulnerability_identity(package)
+            package_id = package_ids.get(identity)
+            if package_id is None:
+                package_id = "SPDXRef-UNION-" + hashlib.sha256(identity.encode()).hexdigest()[:20]
+                package_ids[identity] = package_id
+                merged = copy.deepcopy(package)
+                merged["SPDXID"] = package_id
+                packages.append(merged)
+            source_ids[package["SPDXID"]] = package_id
+        for relationship in sbom["relationships"]:
+            if relationship.get("relationshipType") == "DESCRIBES" and relationship.get("spdxElementId") == "SPDXRef-DOCUMENT":
+                root = source_ids.get(relationship.get("relatedSpdxElement", ""))
+                if root:
+                    roots.add(root)
+            elif relationship.get("relationshipType") == "DEPENDS_ON":
+                source = source_ids.get(relationship.get("spdxElementId", ""))
+                destination = source_ids.get(relationship.get("relatedSpdxElement", ""))
+                if source and destination:
+                    relationships.add((source, destination))
+
+    document["name"] = f"ESPectre {frontend} firmware audit union"
+    document["documentNamespace"] = f"https://espectre.dev/sbom/audit/{frontend}"
+    document["packages"] = packages
+    document["documentDescribes"] = [union_root]
+    document["relationships"] = [
+        {"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": union_root},
+        *[
+            {"spdxElementId": union_root, "relationshipType": "DEPENDS_ON", "relatedSpdxElement": root}
+            for root in sorted(roots)
+        ],
+        *[
+            {"spdxElementId": source, "relationshipType": "DEPENDS_ON", "relatedSpdxElement": destination}
+            for source, destination in sorted(relationships)
+        ],
+    ]
+    return document
+
+
 def write_reports(directory: Path, frontend: str, errors: list[str], unknown: list[str],
-                  result: dict, failure: str | None) -> None:
+                  result: dict, failure: str | None, *, expected_targets: list[str] | None = None,
+                  available_targets: list[str] | None = None) -> None:
     """Keep incomplete scans distinct from successful scans with no findings."""
     directory.mkdir(parents=True, exist_ok=True)
     sarif_path = directory / "results.sarif"
@@ -112,20 +203,24 @@ def write_reports(directory: Path, frontend: str, errors: list[str], unknown: li
     summary = [f"### Firmware audit: {frontend}", "",
                "Status: **incomplete**" if failure else "Status: **completed**", "",
                f"- License policy violations: {len(errors)}",
-               f"- Unidentified licenses: {len(unknown)}",
-               f"- Vulnerability findings: {len(result['findings'])}",
-               f"- Packages without vulnerability identifiers: {result['skipped']}", ""]
+               f"- Unidentified licenses: {len(unknown)}", ""]
+    if expected_targets is not None:
+        available = available_targets or []
+        missing = sorted(set(expected_targets) - set(available))
+        summary += [
+            f"- Target coverage: {len(available)}/{len(expected_targets)}",
+            f"- Audited targets: {', '.join(available) or 'none'}",
+        ]
+        if missing:
+            summary.append(f"- Missing audit inputs: {', '.join(missing)}")
+        summary.append("")
     summary.extend(f"- {error}" for error in errors)
     summary.extend(f"- License requires review: {package}" for package in unknown)
-    for finding in result["findings"]:
-        summary.append(f"- {finding['pkg_name']} {finding.get('pkg_version', '')}: "
-                       f"{finding['cve_id']} ({finding.get('cvss_base_severity') or 'unknown severity'}, "
-                       f"assessment {finding.get('vulnerable', 'unknown')})")
     if failure:
-        summary += ["", f"Scanner error: {failure}"]
+        summary += ["", f"Audit error: {failure}"]
     summary += ["", "Missing metadata is not evidence of safety or license compatibility.", ""]
     (directory / "summary.md").write_text("\n".join(summary), encoding="utf-8")
-    # Do not upload an empty analysis on scanner failure: it could close real alerts.
+    # Do not upload a partial analysis: it could close real alerts for missing targets.
     if failure:
         return
     results, rules = [], {}
@@ -158,46 +253,59 @@ def write_reports(directory: Path, frontend: str, errors: list[str], unknown: li
     sarif_path.write_text(json.dumps(sarif, indent=2) + "\n", encoding="utf-8")
 
 
-def release_blocked(errors: list[str], findings: list[dict]) -> bool:
-    # NVD applicability still requires human triage; MAYBE remains informational.
-    return bool(errors) or any(
-        finding.get("vulnerable") == "YES"
-        and (finding.get("cvss_base_severity") or "UNKNOWN").upper() in {"HIGH", "CRITICAL", "UNKNOWN"}
-        for finding in findings
-    )
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sbom", type=Path, required=True)
+    parser.add_argument("--sbom", type=Path, action="extend", nargs="+", default=[])
     parser.add_argument("--frontend", choices=("esphome", "native", "matter"), required=True)
-    parser.add_argument("--policy", choices=("report", "release"),
-                        default=os.environ.get("ESPECTRE_AUDIT_POLICY", "report"))
+    parser.add_argument("--expected-target", action="append", default=[],
+                        help="Target label expected to provide one SBOM input.")
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--timeout", type=int, default=600, help="Maximum seconds for the NVD scan.")
     args = parser.parse_args()
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
-    directory = args.output_dir or args.sbom.parent / "audit" / args.frontend
+    default_directory = (args.sbom[0].parent if args.sbom else Path.cwd()) / "audit" / args.frontend
+    directory = args.output_dir or default_directory
     errors, unknown = [], []
     result = {"findings": [], "skipped": 0}
-    failure = None
+    failures = []
+    inputs: dict[str, dict] = {}
     try:
-        sbom = json.loads(args.sbom.read_text(encoding="utf-8"))
-        errors, unknown = check_licenses(sbom, args.frontend)
-        result = check_vulnerabilities(args.sbom, args.timeout)
+        for path in args.sbom:
+            target = path.name.removesuffix(".spdx.json")
+            if target in inputs:
+                raise ValueError(f"Duplicate SBOM input for target {target}")
+            inputs[target] = json.loads(path.read_text(encoding="utf-8"))
+        if not inputs:
+            raise ValueError("No SBOM inputs were provided")
+        for sbom in inputs.values():
+            license_errors, license_unknown = check_licenses(sbom, args.frontend)
+            errors.extend(license_errors)
+            unknown.extend(license_unknown)
+        errors = sorted(set(errors))
+        unknown = sorted(set(unknown))
+        with tempfile.TemporaryDirectory(prefix="espectre-audit-union-") as union_directory:
+            union_path = Path(union_directory) / f"{args.frontend}-union.spdx.json"
+            union_path.write_text(json.dumps(build_vulnerability_union(args.frontend, list(inputs.values()))), encoding="utf-8")
+            result = check_vulnerabilities(union_path, args.timeout)
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.TimeoutExpired) as error:
-        failure = str(error)
-    write_reports(directory, args.frontend, errors, unknown, result, failure)
-    blocked = args.policy == "release" and (failure is not None or release_blocked(errors, result["findings"]))
-    status = "incomplete" if failure else "findings" if errors or result["findings"] else "completed"
+        failures.append(str(error))
+    missing_targets = sorted(set(args.expected_target) - set(inputs))
+    if missing_targets:
+        failures.append("Missing audit input for target(s): " + ", ".join(missing_targets))
+    failure = "; ".join(failures) if failures else None
+    write_reports(directory, args.frontend, errors, unknown, result, failure,
+                  expected_targets=args.expected_target or None,
+                  available_targets=sorted(inputs))
+    blocked = failure is not None or bool(errors)
+    status = "incomplete" if failure else "violations" if errors else "completed"
     # Detailed untrusted package metadata stays in the report, outside workflow commands.
     level = "error" if blocked else "warning"
-    if failure or errors or unknown or result["findings"] or result["skipped"]:
-        print(f"::{level}::Firmware audit {status}; review the audit summary.")
-    print(f"Firmware audit ({args.policy}): {status}; {len(errors)} license violations, "
-          f"{len(unknown)} unidentified licenses, {len(result['findings'])} vulnerability findings.")
-    return (2 if failure else 1) if blocked else 0
+    if failure or errors or unknown:
+        print(f"::{level}::Firmware license audit {status}; review the audit summary.")
+    print(f"Firmware license audit: {status}; {len(errors)} license violations, "
+          f"{len(unknown)} unidentified licenses. Vulnerability findings are published through SARIF.")
+    return 2 if failure else 1 if errors else 0
 
 
 if __name__ == "__main__":

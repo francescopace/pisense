@@ -21,7 +21,6 @@ mkdir -p "${MATTER_HOME}" "${MATTER_ROOT_MANAGED_COMPONENTS}" "${MATTER_CCACHE}"
 docker run --rm \
   --user "$(id -u):$(id -g)" \
   -e HOME="/work/.cache/build/matter-home" \
-  -e ESPECTRE_AUDIT_POLICY="${ESPECTRE_AUDIT_POLICY:-report}" \
   -e ESPECTRE_GIT_VERSION="${ESPECTRE_GIT_VERSION}" \
   -e IDF_CCACHE_ENABLE=1 \
   -e CCACHE_DIR="/work/.cache/build/matter-home/ccache-${MATTER_TARGET}" \
@@ -71,8 +70,4 @@ docker run --rm \
       --project-description /work/src/cpp/frontend/matter/app/${BUILD_DIR}/project_description.json \
       --firmware \"\${MATTER_OUTPUT}\" \
       --output-dir \"\$(dirname \"\${MATTER_OUTPUT}\")\"
-    python /work/.github/scripts/audit_firmware_dependencies.py \
-      --frontend matter \
-      --sbom \"\${MATTER_OUTPUT%.bin}-sbom.spdx.json\" \
-      --output-dir /work/.cache/reports/firmware/matter
   "

@@ -25,6 +25,53 @@ ESP_MATTER_NOTICE = (
     REPO_ROOT / "src" / "cpp" / "frontend" / "matter" / "third_party" / "esp_matter" / "NOTICE"
 )
 
+# Reviewed complete license texts, also verified in the firmware license archives.
+# A changed text requires another review; neither a package name nor a NOTICE
+# alone grants permission to assign a license to a third-party package.
+REVIEWED_LICENSE_TEXTS = {
+    "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30": "Apache-2.0",
+    "ef4aac92e05e87cd1cdc140870ed52206ba03d4a7fe46c1e11d7ffa6c87d252b": "BSD-3-Clause",
+    "a36dda207c36db5818729c54e7ad4e8b0c6fba847491ba64f372c1a2037b6d5c": "MIT",
+}
+
+
+def enrich_subpackage_licenses(sbom: dict, components: dict[str, Path]) -> None:
+    """Resolve reviewed nested packages against their actual build component."""
+    locations = {}
+    for name, component, relative in (
+        ("lwip-lwip", "lwip", "lwip/COPYING"),
+        ("esp-phy-lib", "esp_phy", "lib/LICENSE"),
+        ("esp-coex-lib", "esp_coex", "lib/LICENSE"),
+        ("esp-wifi-lib", "esp_wifi", "lib/LICENSE"),
+        ("bt-esp-ble-mesh-lib-lib", "bt", "esp_ble_mesh/lib/lib/LICENSE"),
+        ("bt-controller-lib-esp32", "bt", "controller/lib_esp32/LICENSE"),
+        ("bt-controller-lib-esp32c3-family", "bt", "controller/lib_esp32c3_family/LICENSE"),
+    ):
+        for kind in ("SUBMODULE", "SUBPACKAGE"):
+            locations[f"SPDXRef-{kind}-{name}"] = (component, relative)
+    locations["SPDXRef-VIRTPACKAGE-espressif--cjson-sbom-cJSON.yml"] = (
+        "espressif__cjson", "cJSON/LICENSE",
+    )
+    for package in sbom["packages"]:
+        location = locations.get(package["SPDXID"])
+        if location is None or package.get("licenseDeclared", "NOASSERTION") != "NOASSERTION":
+            continue
+        component, relative = location
+        component_id = "SPDXRef-COMPONENT-" + re.sub(r"[^A-Za-z0-9.-]", "-", component)
+        root = components.get(component_id)
+        if root is None:
+            continue
+        source = (root / relative).resolve()
+        if not source.is_relative_to(root) or not source.is_file():
+            continue
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        expression = REVIEWED_LICENSE_TEXTS.get(digest)
+        if expression is None:
+            continue
+        package["licenseDeclared"] = expression
+        evidence = f"Reviewed license text: {component}/{relative}; SHA256: {digest}."
+        package["licenseComments"] = "\n".join(filter(None, (package.get("licenseComments"), evidence)))
+
 
 @dataclass
 class Package:
@@ -272,6 +319,7 @@ def enrich_sbom(sbom: dict, description: dict, frontend: str, firmware: Path) ->
         "SPDXRef-COMPONENT-" + re.sub(r"[^A-Za-z0-9.-]", "-", name): Path(info["dir"]).resolve()
         for name, info in description["build_component_info"].items() if info.get("dir")
     }
+    enrich_subpackage_licenses(sbom, components)
     project_ids = {
         relation["relatedSpdxElement"] for relation in sbom["relationships"]
         if relation["relationshipType"] == "DESCRIBES"
