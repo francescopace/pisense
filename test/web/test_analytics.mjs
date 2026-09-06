@@ -306,6 +306,23 @@ describe('analytics route metadata', () => {
         assert.equal(event[2].page_location, 'https://espectre.dev/guides/setup/');
     });
 
+    it('records 404 suggestions only with consent and keeps the requested page location', () => {
+        for (const storedConsent of [null, 'denied', 'granted']) {
+            const { api, window } = analyticsContext({
+                path: '/documentation/setup/', staticPage: true, storedConsent
+            });
+            api.initializeConsentControls();
+            api.trackEvent('select_404_suggestion', { source_url: 'private', destination: 'private' });
+            const events = window.dataLayer?.filter((entry) => entry[1] === 'select_404_suggestion') || [];
+            assert.equal(events.length, storedConsent === 'granted' ? 1 : 0);
+            if (storedConsent === 'granted') {
+                assert.deepEqual(Object.keys(events[0][2]), ['content_group']);
+                const pageView = window.dataLayer.find((entry) => entry[1] === 'page_view');
+                assert.equal(pageView[2].page_location, 'https://espectre.dev/documentation/setup/');
+            }
+        }
+    });
+
     it('updates the Google tag configuration before a virtual page view', () => {
         const { api, window } = analyticsContext({ hash: '#tool-monitor' });
         api.enableAnalytics({ sendPageView: false });

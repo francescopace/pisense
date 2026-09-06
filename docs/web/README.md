@@ -83,6 +83,10 @@ The shared `build-pages` action stages dependencies, runs the web tests, builds 
 
 ## Routing and Analytics
 
+`404-suggestions.json` maps retired paths to a related destination and its link title. The 404 page loads this map with HTTP revalidation and shows one suggestion for an exact path match, accepting a missing trailing slash or an `index.html` suffix. Unknown paths and failed map requests retain the generic navigation. Suggestions do not redirect or change the requested URL or HTTP 404 status. Internal destinations must be registered public routes; external destinations are limited to the project's GitHub repository.
+
+With Analytics consent, the existing static `page_view` records the requested path without query parameters. Clicking a suggestion also sends `select_404_suggestion` with no custom parameters; its page location identifies the old URL, and the JSON map identifies the destination. Normal destination-link events can still fire independently. No Cloudflare or deployment configuration is required.
+
 The SPA uses canonical paths with the History API. Legacy root hash links remain valid entry points and are replaced with their registered canonical path. Static tool calls to action may use this legacy handoff so the browser opens the persistent shell without losing the selected tool.
 
 Device settings and Monitor load with the shared device session. CSI visualizer, Game, and Theremin load their scripts on first use through `data-script-src`. Keep `app.js` last among the core `defer` scripts because it binds their initializers.

@@ -8,10 +8,85 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { index, read, routeBootstrap, routeManifest, routeRegistry, styles } from './fixtures/site_test_helpers.mjs';
 
+const errorSuggestions = JSON.parse(read('docs/web/404-suggestions.json'));
+
+async function renderErrorSuggestion(path, { map = errorSuggestions, ok = true, error = null } = {}) {
+    const section = { hidden: true };
+    const events = [];
+    const listeners = new Map();
+    const link = { addEventListener: (name, callback) => listeners.set(name, callback) };
+    const location = Object.freeze({
+        origin: 'https://espectre.dev', pathname: path, search: '?private=value', hash: '#old-heading'
+    });
+    await runInNewContext(read('docs/web/assets/js/404-suggestions.js'), {
+        URL, Object,
+        document: {
+            querySelector: (selector) => selector === '.js-error-suggestion' ? section : link
+        },
+        window: { location, trackEvent: (...args) => events.push(args) },
+        fetch: async (url, options) => {
+            assert.equal(url, '/404-suggestions.json');
+            assert.equal(options.cache, 'no-cache');
+            if (error) throw error;
+            return { ok, json: async () => map };
+        }
+    });
+    return { section, link, events, click: () => listeners.get('click')?.() };
+}
+
 describe('website navigation contracts', () => {
+    it('maps retired paths to existing public routes or project documents', () => {
+        for (const [path, suggestion] of Object.entries(errorSuggestions)) {
+            assert.ok(path.startsWith('/') && path.endsWith('/'));
+            const destination = new URL(suggestion.href, 'https://espectre.dev');
+            if (destination.origin === 'https://espectre.dev') {
+                assert.ok(routeManifest.routes.some((route) => route.staticPath === destination.pathname));
+            } else {
+                assert.equal(destination.origin, 'https://github.com');
+                const prefix = '/francescopace/espectre/blob/develop/';
+                assert.ok(destination.pathname.startsWith(prefix));
+                assert.ok(existsSync(new URL(`../../${destination.pathname.slice(prefix.length)}`, import.meta.url)));
+            }
+        }
+    });
+
+    it('offers the mapped destination on the 404 without forwarding query parameters or fragments', async () => {
+        for (const [path, suggestion] of Object.entries(errorSuggestions)) {
+            for (const variant of [path, path.slice(0, -1), `${path}index.html`]) {
+                const result = await renderErrorSuggestion(variant);
+                assert.equal(result.section.hidden, false);
+                assert.equal(result.link.href, new URL(suggestion.href, 'https://espectre.dev').href);
+                assert.deepEqual(result.events, []);
+                result.click();
+                assert.deepEqual(result.events, [['select_404_suggestion']]);
+            }
+        }
+    });
+
+    it('keeps generic navigation for unknown paths, unavailable maps, and unsafe destinations', async () => {
+        const scenarios = [
+            ['/unknown/'],
+            ['/documentation/setup/extra/'],
+            ['/documentation/setup/', { ok: false }],
+            ['/documentation/setup/', { error: new Error('Offline') }],
+            ['/documentation/setup/', { map: null }],
+            ['/documentation/setup/', { error: new SyntaxError('Invalid JSON') }],
+            ...['javascript:alert(1)', '//example.com/', 'https://github.com/another/project/'].map(
+                (href) => ['/documentation/setup/', { map: { '/documentation/setup/': { href, title: 'Link' } } }]
+            )
+        ];
+        for (const [path, options] of scenarios) {
+            const result = await renderErrorSuggestion(path, options);
+            assert.equal(result.section.hidden, true);
+            assert.equal(result.link.href, undefined);
+            assert.deepEqual(result.events, []);
+        }
+    });
+
     it('selects the newest available firmware for the home badge and preserves the Flash link', async () => {
         const source = read('docs/web/assets/js/app.js');
         const start = source.indexOf('    let releaseBadgeChecked = false;');

@@ -47,6 +47,7 @@ const ANALYTICS_EVENT_PARAMETERS = Object.freeze({
         'duration_seconds', 'error_type', 'reason'
     ],
     sdk_download: ['channel', 'format', 'link_text'],
+    select_404_suggestion: [],
     select_documentation: ['document_name', 'link_text'],
     select_guide: ['guide_name', 'link_text'],
     select_tool: ['tool_name', 'link_text'],

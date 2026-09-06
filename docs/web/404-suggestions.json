@@ -1,0 +1,46 @@
+{
+  "/game/": {
+    "href": "/tools/game/",
+    "title": "Play the motion game"
+  },
+  "/documentation/": {
+    "href": "/guides/",
+    "title": "Browse the guides"
+  },
+  "/documentation/setup/": {
+    "href": "/guides/setup/",
+    "title": "Flash and set up your device"
+  },
+  "/documentation/tuning/": {
+    "href": "/guides/placement/",
+    "title": "Placement and tuning"
+  },
+  "/documentation/algorithms/": {
+    "href": "/sdk/detectors/",
+    "title": "How the detectors work"
+  },
+  "/documentation/micro-espectre/": {
+    "href": "/guides/micropython/",
+    "title": "Run ESPectre on MicroPython"
+  },
+  "/documentation/ml-data-collection/": {
+    "href": "https://github.com/francescopace/espectre/blob/develop/docs/ML_DATA_COLLECTION.md",
+    "title": "ML data collection guide on GitHub"
+  },
+  "/documentation/roadmap/": {
+    "href": "/roadmap/",
+    "title": "Explore the roadmap"
+  },
+  "/documentation/changelog/": {
+    "href": "https://github.com/francescopace/espectre/blob/develop/docs/CHANGELOG.md",
+    "title": "Read the changelog on GitHub"
+  },
+  "/documentation/performance/": {
+    "href": "/guides/detectors/#detectors-evidence",
+    "title": "Detector performance and benchmarks"
+  },
+  "/documentation/contributing/": {
+    "href": "https://github.com/francescopace/espectre/blob/develop/CONTRIBUTING.md",
+    "title": "Contribute to ESPectre on GitHub"
+  }
+}

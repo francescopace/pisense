@@ -13,7 +13,8 @@
 <link rel="stylesheet" href="/assets/css/styles.css?v=f4f078fd5b99">
 <script src="/assets/js/route-registry.js?v=0e61b3ccecd0" defer></script>
 <script src="/assets/js/navigation.js?v=5e24236e3e2a" defer></script>
-<script src="/assets/js/analytics.js?v=28ac63c6d3e9" defer></script>
+<script src="/assets/js/analytics.js?v=b59bb346855f" defer></script>
+<script src="/assets/js/404-suggestions.js?v=5ddcc6a8fb1a" defer></script>
 </head>
 <body>
 <a class="skip-link" href="#main-content">Skip to content</a>
@@ -47,6 +48,16 @@
     </div>
   </section>
 
+  <section class="home-action-group js-error-suggestion" aria-labelledby="error-suggestion-title" hidden>
+    <div class="home-license-cta">
+      <div>
+        <h2 id="error-suggestion-title">Looking for this page?</h2>
+        <p>This address belonged to the old site. Try the related page below.</p>
+      </div>
+      <a class="btn-primary js-error-suggestion-link"></a>
+    </div>
+  </section>
+
   <section class="home-action-group" aria-labelledby="error-explore-title">
     <h2 class="home-kicker" id="error-explore-title">EXPLORE</h2>
     <nav class="home-resource-strip" aria-label="Explore ESPectre">
@@ -59,17 +70,6 @@
         <a href="https://github.com/francescopace/espectre" target="_blank" rel="noopener"><strong>GitHub</strong><span>Source, issues, and discussions ↗</span></a>
       </div>
     </nav>
-  </section>
-  
-  <section class="home-action-group" aria-labelledby="error-license-title">
-    <span class="home-kicker">COMMERCIAL LICENSING</span>
-    <aside class="home-license-cta">
-      <div>
-        <h2 id="error-license-title">Building a proprietary product?</h2>
-        <p>See what a commercial license can cover, where GPLv3 applies, and how to contact us.</p>
-      </div>
-      <a href="/licensing/" class="btn-primary">Explore commercial licensing →</a>
-    </aside>
   </section>
 
 </main>
