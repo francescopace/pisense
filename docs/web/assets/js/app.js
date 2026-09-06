@@ -103,27 +103,64 @@
 
     let releaseBadgeChecked = false;
 
+    function parseFirmwareVersion(version) {
+        if (typeof version !== 'string') return null;
+        const normalized = version.replace(/^v/, '');
+        const snapshot = normalized.match(/-(\d+)-g[0-9a-f]+$/i);
+        const tag = snapshot ? normalized.slice(0, snapshot.index) : normalized;
+        const match = tag.match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/);
+        if (!match) return null;
+        return {
+            version: normalized,
+            core: match.slice(1, 4).map(Number),
+            prerelease: match[4] || '',
+            commits: snapshot ? Number(snapshot[1]) : 0
+        };
+    }
+
+    function compareFirmwareVersions(left, right) {
+        for (let index = 0; index < left.core.length; index++) {
+            if (left.core[index] !== right.core[index]) return left.core[index] - right.core[index];
+        }
+        if (left.prerelease !== right.prerelease) {
+            if (!left.prerelease) return 1;
+            if (!right.prerelease) return -1;
+            return left.prerelease.localeCompare(right.prerelease, 'en', { numeric: true });
+        }
+        return left.commits - right.commits;
+    }
+
     async function updateReleaseBadge() {
         if (releaseBadgeChecked) return;
         releaseBadgeChecked = true;
-        try {
-            const response = await fetch(
-                '/artifacts/firmware/release/firmware-manifest-release.json',
-                { cache: 'no-store' }
-            );
-            if (!response.ok) {
-                const error = new Error(`HTTP ${response.status}`);
-                error.status = response.status;
-                throw error;
+        const candidates = await Promise.all(['release', 'preview'].map(async (channel) => {
+            try {
+                const response = await fetch(
+                    `/artifacts/firmware/${channel}/firmware-manifest-${channel}.json`,
+                    { cache: 'no-store' }
+                );
+                if (!response.ok) {
+                    const error = new Error(`HTTP ${response.status}`);
+                    error.status = response.status;
+                    throw error;
+                }
+                const manifest = await response.json();
+                const parsed = parseFirmwareVersion(manifest.version);
+                return parsed ? { ...parsed, channel } : null;
+            } catch (error) {
+                if (error && error.status !== 404) console.warn('Release badge unavailable:', error);
+                return null;
             }
-            const manifest = await response.json();
-            const version = String(manifest.release_tag || manifest.version || '').replace(/^v/, '');
-            if (!version) return;
-            $('.js-release-text').textContent = `v${version} available`;
-            $('.js-release-badge').hidden = false;
-        } catch (error) {
-            if (error && error.status !== 404) console.warn('Release badge unavailable:', error);
-        }
+        }));
+        const latest = candidates.filter(Boolean).reduce((selected, candidate) => (
+            !selected || compareFirmwareVersions(candidate, selected) > 0 ? candidate : selected
+        ), null);
+        if (!latest) return;
+        const badge = $('.js-release-badge');
+        badge.dataset.firmwareChannel = latest.channel;
+        badge.dataset.firmwareVersion = latest.version;
+        $('.js-release-text').textContent = `v${latest.version} available`;
+        badge.hidden = false;
     }
 
     /* ============================================================= routing */

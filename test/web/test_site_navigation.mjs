@@ -12,6 +12,64 @@ import { runInNewContext } from 'node:vm';
 import { index, read, routeBootstrap, routeManifest, routeRegistry, styles } from './fixtures/site_test_helpers.mjs';
 
 describe('website navigation contracts', () => {
+    it('selects the newest available firmware for the home badge and preserves the Flash link', async () => {
+        const source = read('docs/web/assets/js/app.js');
+        const start = source.indexOf('    let releaseBadgeChecked = false;');
+        const end = source.indexOf('    /*', start);
+        const scenarios = [
+            ['3.1.0', '3.0.0-12-gabcdef0', 'release'],
+            ['3.1.0', '3.1.0-1-gabcdef0', 'preview'],
+            ['3.1.0', '3.1.0', 'release'],
+            ['3.1.0', '3.1.0-0-gabcdef0', 'release'],
+            ['3.1.0', '3.1.0-rc2-5-gabcdef0', 'release'],
+            ['3.1.0-rc2', '3.1.0-rc2-5-gabcdef0', 'preview'],
+            ['3.1.0-rc10', '3.1.0-rc2-5-gabcdef0', 'release'],
+            ['3.9.0', '3.10.0-1-gabcdef0', 'preview'],
+            ['3.1.0', null, 'release'],
+            [null, '3.1.0-1-gabcdef0', 'preview'],
+            ['snapshot', '3.1.0-1-gabcdef0', 'preview'],
+            [new Error('Network unavailable'), '3.1.0-1-gabcdef0', 'preview'],
+            ['3.1.0', new SyntaxError('Invalid JSON'), 'release'],
+            [null, null, null],
+            ['snapshot', '', null],
+        ];
+        for (const [release, preview, expectedChannel] of scenarios) {
+            const versions = { release, preview };
+            const badge = { hidden: true, dataset: {} };
+            const label = { textContent: '' };
+            const requests = [];
+            const context = {
+                $: (selector) => selector === '.js-release-badge' ? badge : label,
+                console: { warn() {} },
+                fetch: async (url) => {
+                    requests.push(url);
+                    const channel = url.split('/')[3];
+                    assert.equal(url, `/artifacts/firmware/${channel}/firmware-manifest-${channel}.json`);
+                    const version = versions[channel];
+                    if (version instanceof Error && !(version instanceof SyntaxError)) throw version;
+                    return {
+                        ok: version !== null,
+                        status: version === null ? 404 : 200,
+                        json: async () => {
+                            if (version instanceof SyntaxError) throw version;
+                            return { version, release_tag: channel === 'preview' ? 'snapshot' : version };
+                        }
+                    };
+                }
+            };
+            await runInNewContext(source.slice(start, end) + '\nupdateReleaseBadge();', context);
+            assert.equal(badge.hidden, expectedChannel === null);
+            if (expectedChannel) {
+                assert.equal(badge.dataset.firmwareChannel, expectedChannel);
+                assert.equal(badge.dataset.firmwareVersion, versions[expectedChannel]);
+            }
+            await runInNewContext('updateReleaseBadge();', context);
+            assert.equal(requests.length, 2);
+        }
+        const badgeTag = index.match(/<a\b[^>]*class="[^"]*\bjs-release-badge\b[^"]*"[^>]*>/)?.[0];
+        assert.match(badgeTag, /href="\/tools\/flash\/"/);
+    });
+
     it('keeps one route registry aligned with the SPA pages and static paths', () => {
         const registeredRoutes = routeManifest.routes.map((route) => route.name).sort();
         const pageRoutes = [...index.matchAll(/<main\b[^>]*\bdata-page="([^"]+)"/g)]
