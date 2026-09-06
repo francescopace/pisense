@@ -126,7 +126,7 @@ bool matches(const std::vector<uint8_t> &payload,
              const CsiFrameFilterConfig &config,
              const uint8_t *destination_mac = kLocalMac) {
   const wifi_csi_info_t info = csi_info(payload, destination_mac);
-  return csi_frame_matches_traffic(&info, config);
+  return csi_frame_matches_traffic(&info, config, CsiCaptureProfile::HT20);
 }
 
 CsiFrameFilterConfig filter(CsiTrafficMode mode, RuntimeTrafficMode internal = RuntimeTrafficMode::PING) {
@@ -146,6 +146,79 @@ CsiFrameFilterConfig filter(CsiTrafficMode mode, RuntimeTrafficMode internal = R
 
 void setUp(void) {}
 void tearDown(void) {}
+
+void test_local_ack_requires_lltf20_for_every_traffic_mode(void) {
+  uint8_t header[10] = {0xD4U, 0U, 0U, 0U};
+  std::memcpy(header + 4U, kLocalMac, 6U);
+  wifi_csi_info_t info{};
+  info.hdr = header;
+  info.rx_ctrl.sig_len = sizeof(header) + 4U;
+
+  for (const auto mode : {CsiTrafficMode::INTERNAL, CsiTrafficMode::EXTERNAL}) {
+    for (const auto internal : {RuntimeTrafficMode::PING, RuntimeTrafficMode::DNS,
+                                RuntimeTrafficMode::DNS_TCP}) {
+      const auto config = filter(mode, internal);
+      TEST_ASSERT_TRUE(csi_frame_matches_traffic(&info, config, CsiCaptureProfile::LLTF20));
+      TEST_ASSERT_FALSE(csi_frame_matches_traffic(&info, config, CsiCaptureProfile::HT20));
+      TEST_ASSERT_FALSE(csi_frame_matches_traffic(&info, config, CsiCaptureProfile::VHT20));
+    }
+  }
+}
+
+void test_lltf20_rejects_ack_without_valid_local_receiver_or_header(void) {
+  auto config = filter(CsiTrafficMode::EXTERNAL);
+  uint8_t header[10] = {0xD4U, 0U, 0U, 0U};
+  std::memcpy(header + 4U, kLocalMac, 6U);
+  wifi_csi_info_t info{};
+  info.hdr = header;
+  info.rx_ctrl.sig_len = sizeof(header) + 4U;
+  const auto accepted = [&]() {
+    return csi_frame_matches_traffic(&info, config, CsiCaptureProfile::LLTF20);
+  };
+  TEST_ASSERT_TRUE(accepted());
+  std::memcpy(header + 4U, kOtherMac, 6U);
+  std::memcpy(info.dmac, kLocalMac, 6U);
+  TEST_ASSERT_FALSE(accepted());
+  std::memcpy(header + 4U, kLocalMac, 6U);
+  std::memset(config.local_mac_addr, 0, 6U);
+  TEST_ASSERT_FALSE(accepted());
+  std::memcpy(config.local_mac_addr, kMulticastMac, 6U);
+  std::memcpy(header + 4U, kMulticastMac, 6U);
+  TEST_ASSERT_FALSE(accepted());
+  std::memcpy(config.local_mac_addr, kLocalMac, 6U);
+  std::memcpy(header + 4U, kLocalMac, 6U);
+  for (const uint8_t control : {0xC4U, 0x94U, 0x80U, 0x08U, 0xD5U}) {
+    header[0] = control;  // CTS, Block ACK, beacon, data, and invalid version.
+    TEST_ASSERT_FALSE(accepted());
+  }
+  header[0] = 0xD4U;
+  header[1] = 0x01U;
+  TEST_ASSERT_FALSE(accepted());
+  header[1] = 0U;
+  for (const uint16_t length : {0U, 9U, 13U, 15U}) {
+    info.rx_ctrl.sig_len = length;
+    TEST_ASSERT_FALSE(accepted());
+  }
+  info.rx_ctrl.sig_len = sizeof(header) + 4U;
+  info.rx_ctrl.rx_state = 1U;
+  TEST_ASSERT_FALSE(accepted());
+  info.rx_ctrl.rx_state = 0U;
+  info.hdr = nullptr;
+  TEST_ASSERT_FALSE(accepted());
+  TEST_ASSERT_FALSE(csi_frame_matches_traffic(nullptr, config, CsiCaptureProfile::LLTF20));
+}
+
+void test_lltf20_preserves_ip_traffic_provenance_filter(void) {
+  const auto config = filter(CsiTrafficMode::INTERNAL, RuntimeTrafficMode::DNS_TCP);
+  const auto reply = dns_tcp_reply(true);
+  const auto tcp_ack = dns_tcp_reply(false);
+  const auto unrelated = ping_reply(kGateway, 0x1234U);
+  for (const auto *payload : {&reply, &tcp_ack, &unrelated}) {
+    const auto info = csi_info(*payload);
+    TEST_ASSERT_EQUAL(payload == &reply,
+                      csi_frame_matches_traffic(&info, config, CsiCaptureProfile::LLTF20));
+  }
+}
 
 void test_external_accepts_only_canonical_unicast_and_multicast_marker(void) {
   const CsiFrameFilterConfig config = filter(CsiTrafficMode::EXTERNAL);
@@ -282,6 +355,9 @@ void test_internal_dns_udp_requires_gateway_udp_53_response(void) {
 int main() {
   using namespace espectre::test;
   begin_suite();
+  RUN_TEST(test_local_ack_requires_lltf20_for_every_traffic_mode);
+  RUN_TEST(test_lltf20_rejects_ack_without_valid_local_receiver_or_header);
+  RUN_TEST(test_lltf20_preserves_ip_traffic_provenance_filter);
   RUN_TEST(test_external_accepts_only_canonical_unicast_and_multicast_marker);
   RUN_TEST(test_external_rejects_other_mac_fragments_and_truncation);
   RUN_TEST(test_external_rejects_udp_length_mismatch_and_data_after_marker);

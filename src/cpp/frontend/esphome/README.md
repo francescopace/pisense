@@ -127,7 +127,7 @@ espectre:
 | `motion_off_hits_number` | number | `Motion Off Hits` | Runtime motion-off debounce count (1–20) |
 | `detector_select` | select | `Detection Profile` | Runtime `lightweight` / `high_accuracy` selection |
 | `csi_traffic_mode_select` | select | `CSI Traffic Ownership` | Runtime `internal` / `external` selection |
-| `traffic_generator_mode_select` | select | `CSI Traffic Source` | Runtime `ping` / `dns` (UDP) / `dns_tcp` selection |
+| `traffic_generator_mode_select` | select | `CSI Traffic Source` | Runtime `ping` / `dns` (UDP) / `dns_tcp` / `wifi_raw` selection |
 | `sensing_switch` | switch | `Sensing Enabled` | Enables or pauses sensing through the common command engine; publishes the runtime state at startup |
 | `recalibrate_button` | button | `Recalibrate` | Starts runtime recalibration |
 | `calibration_active_sensor` | binary_sensor | `Calibration Active` | Read-only authoritative calibration state |
@@ -251,7 +251,7 @@ espectre:
 
 The `traffic_generator_mode_select` entity can change the internal source at runtime, and `csi_traffic_mode_select` can switch between internal and external ownership. Both selections persist after an accepted change.
 
-The shared component default is `ping`. The published product examples use that default. `dns` and `dns_tcp` remain available where they perform better, and no mode silently falls back to another.
+The shared component default is `ping`. The published product examples use that default. `dns`, `dns_tcp`, and `wifi_raw` remain available where they perform better, and no mode silently falls back to another.
 
 ### External Traffic Mode
 

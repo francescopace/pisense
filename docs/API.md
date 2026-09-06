@@ -98,7 +98,7 @@ The CSI feature is named `csi`. Clients must tolerate additive resources, operat
 | `threshold` | number | Current detector threshold in `[0.0, 1.0]` |
 | `motion_on_hits`, `motion_off_hits` | integer | Consecutive evaluations required for each state transition |
 | `csi_traffic_mode` | string | `internal` or `external` |
-| `traffic_generator_mode` | string | `ping`, `dns`, or `dns_tcp` |
+| `traffic_generator_mode` | string | `ping`, `dns`, `dns_tcp`, or `wifi_raw` |
 | `csi_target_pps` | integer | Configured CSI traffic target in packets per second |
 | `csi_traffic_udp_port` | integer, optional | External CSI traffic UDP port |
 | `csi_traffic_multicast_group` | string, optional | External CSI traffic multicast group |
@@ -194,7 +194,7 @@ Operations reject unknown fields. Routes described as taking no parameters accep
 | `threshold` | finite number in `[0.0, 1.0]` |
 | `motion_on_hits`, `motion_off_hits` | integers from `1` through `20`; both must be present together |
 | `csi_traffic_mode` | `internal` or `external` |
-| `traffic_generator_mode` | `ping`, `dns`, or `dns_tcp` |
+| `traffic_generator_mode` | `ping`, `dns`, `dns_tcp`, or `wifi_raw` |
 
 The request is parsed and all field constraints and capabilities are checked before changes are applied. Success returns HTTP `200` and publishes `sensing`. `POST /sensing/calibrations` takes no parameters, returns HTTP `202` when queued, and returns `409` with code `busy` when calibration is already active.
 

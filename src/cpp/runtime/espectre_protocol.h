@@ -266,7 +266,7 @@ struct EspectreDeviceInfo {
    */
   std::string csi_traffic_mode;
   /**
-   * Internal traffic generator mode: `"ping"`, `"dns"`, or `"dns_tcp"`.
+   * Internal traffic generator mode: `"ping"`, `"dns"`, `"dns_tcp"`, or `"wifi_raw"`.
    *
    * Omitted from `info` when empty.
    */

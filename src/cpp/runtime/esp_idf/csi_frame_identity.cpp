@@ -29,6 +29,18 @@ constexpr uint8_t kIpProtoTcp = 6U;
 constexpr uint8_t kIpProtoUdp = 17U;
 constexpr uint8_t kLlcSnapPrefix[6] = {0xAAU, 0xAAU, 0x03U, 0x00U, 0x00U, 0x00U};
 
+bool matches_local_ack(const wifi_csi_info_t *info, const CsiFrameFilterConfig &config) {
+  // An ACK has a 10-byte MAC header and a 4-byte FCS, but no transmitter
+  // address or IP payload. Read its receiver address directly from the header.
+  constexpr size_t kAckFrameBytes = 14U;
+  constexpr uint8_t kAckFrameControl = 0xD4U;
+  if (info->hdr == nullptr || info->rx_ctrl.sig_len != kAckFrameBytes ||
+      info->rx_ctrl.rx_state != 0U || is_zero_mac_address(config.local_mac_addr) ||
+      (config.local_mac_addr[0] & 0x01U) != 0U) return false;
+  return info->hdr[0] == kAckFrameControl && (info->hdr[1] & 0x03U) == 0U &&
+         std::memcmp(info->hdr + 4U, config.local_mac_addr, 6U) == 0;
+}
+
 uint16_t read_be16(const uint8_t *data) {
   return static_cast<uint16_t>((static_cast<uint16_t>(data[0]) << 8U) |
                                static_cast<uint16_t>(data[1]));
@@ -168,8 +180,10 @@ bool matches_internal_dns_udp(const ParsedIpv4 &packet, const CsiFrameFilterConf
 }  // namespace
 
 bool csi_frame_matches_traffic(const wifi_csi_info_t *info,
-                               const CsiFrameFilterConfig &config) {
+                               const CsiFrameFilterConfig &config,
+                               CsiCaptureProfile profile) {
   if (info == nullptr) return false;
+  if (csi_capture_profile_uses_lltf(profile) && matches_local_ack(info, config)) return true;
   ParsedIpv4 packet;
   if (!parse_bounded_payload(info, &packet) ||
       !destination_mac_matches(packet, config, info->dmac)) return false;
@@ -177,6 +191,8 @@ bool csi_frame_matches_traffic(const wifi_csi_info_t *info,
     return matches_external_udp(packet, config) || matches_external_ping(packet, config);
   }
   switch (config.internal_mode) {
+    case RuntimeTrafficMode::WIFI_RAW:
+      return false;  // Only the LLTF20 ACK path above supplies raw Wi-Fi samples.
     case RuntimeTrafficMode::DNS:
       return matches_internal_dns_udp(packet, config);
     case RuntimeTrafficMode::DNS_TCP:

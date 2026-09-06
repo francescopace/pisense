@@ -580,8 +580,9 @@ bool validate_sdk_command_parameters(const std::vector<JsonObjectField> &fields,
       if (!string_field("traffic_generator_mode", &parsed.traffic_generator_mode) ||
           (parsed.traffic_generator_mode != RUNTIME_TRAFFIC_GENERATOR_MODE_PING_NAME &&
            parsed.traffic_generator_mode != RUNTIME_TRAFFIC_GENERATOR_MODE_DNS_NAME &&
-           parsed.traffic_generator_mode != RUNTIME_TRAFFIC_GENERATOR_MODE_DNS_TCP_NAME)) {
-        return reject("invalid traffic generator mode (accepted: ping, dns, and dns_tcp)");
+           parsed.traffic_generator_mode != RUNTIME_TRAFFIC_GENERATOR_MODE_DNS_TCP_NAME &&
+           parsed.traffic_generator_mode != RUNTIME_TRAFFIC_GENERATOR_MODE_WIFI_RAW_NAME)) {
+        return reject("invalid traffic generator mode (accepted: ping, dns, dns_tcp, and wifi_raw)");
       }
       parsed.has_traffic_generator_mode = true;
     }

@@ -387,7 +387,7 @@ void CsiPipeline::capture_packet_callback_(void *context,
     traffic_filter_configured = pipeline->traffic_filter_configured_;
   }
   if (traffic_filter_configured) {
-    if (!csi_frame_matches_traffic(data, traffic_filter)) {
+    if (!csi_frame_matches_traffic(data, traffic_filter, pipeline->capture_profile())) {
       pipeline->traffic_rejected_packets_total_.fetch_add(1U, std::memory_order_relaxed);
       return;
     }
@@ -471,6 +471,23 @@ esp_err_t CsiPipeline::enable(csi_processed_callback_t packet_callback,
     enabled_ = true;
     last_heartbeat_ms_ = 0U;
     packets_processed_.store(0U, std::memory_order_relaxed);
+  }
+  return err;
+}
+
+esp_err_t CsiPipeline::reconfigure_capture(CsiCaptureProfile profile) {
+  if (!enabled_) return ESP_ERR_INVALID_STATE;
+  if (capture_profile() == profile) return ESP_OK;
+  const CsiCaptureProfile previous_profile = capture_profile();
+  const auto callback = packet_callback_;
+  const esp_err_t disable_err = disable();
+  if (disable_err != ESP_OK) return disable_err;
+  const esp_err_t err = enable(callback, profile);
+  if (err != ESP_OK) {
+    const esp_err_t restore_err = enable(callback, previous_profile);
+    if (restore_err != ESP_OK) {
+      ESPECTRE_LOGE(TAG, "Failed to restore CSI profile: %s", esp_err_to_name(restore_err));
+    }
   }
   return err;
 }

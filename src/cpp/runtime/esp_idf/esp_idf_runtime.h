@@ -73,6 +73,7 @@ class EspIdfRuntime : public EspIdfRuntimeBase {
   void finish_csi_receive_path_refresh_(esp_err_t result);
   void refresh_wifi_association_from_csi_();
   void start_sensing_services_(const esp_netif_ip_info_t &ip_info);
+  CsiCaptureProfile sensing_capture_profile_() const;
   void stop_sensing_services_();
   void on_csi_channel_changed_(uint8_t previous_channel, uint8_t current_channel);
   bool apply_traffic_runtime_config_(bool restart_service, bool recalibrate_if_active);

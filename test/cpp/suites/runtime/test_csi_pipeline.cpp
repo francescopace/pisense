@@ -18,6 +18,7 @@
 #include "lwip/inet.h"
 #include "lightweight_detector.h"
 #include "csi_pipeline.h"
+#include "csi_platform_config.h"
 #include "utils.h"
 #include "wifi_csi_interface.h"
 #include "esphome/core/log.h"
@@ -116,6 +117,11 @@ class WiFiCSIMock : public IWiFiCSI {
   esp_err_t set_csi_config(const wifi_csi_config_t* config) override {
     (void)config;
     calls_.push_back('C');
+    if (config_error_once_ != ESP_OK) {
+      const esp_err_t err = config_error_once_;
+      config_error_once_ = ESP_OK;
+      return err;
+    }
     return config_error_;
   }
   esp_err_t set_csi_rx_cb(wifi_csi_cb_t cb, void* ctx) override {
@@ -142,6 +148,7 @@ class WiFiCSIMock : public IWiFiCSI {
   void clear_calls() { calls_.clear(); }
 
   void set_config_error(esp_err_t err) { config_error_ = err; }
+  void fail_next_config_call(esp_err_t err) { config_error_once_ = err; }
   void set_callback_error(esp_err_t err) { callback_error_ = err; }
   void fail_next_callback_calls(size_t count, esp_err_t err) {
     callback_failures_remaining_ = count;
@@ -150,6 +157,7 @@ class WiFiCSIMock : public IWiFiCSI {
   void set_csi_error(esp_err_t err) { csi_error_ = err; }
   void reset_errors() {
     config_error_ = ESP_OK;
+    config_error_once_ = ESP_OK;
     callback_error_ = ESP_OK;
     csi_error_ = ESP_OK;
     callback_failure_error_ = ESP_OK;
@@ -166,6 +174,7 @@ class WiFiCSIMock : public IWiFiCSI {
  private:
   bool enabled_{false};
   esp_err_t config_error_{ESP_OK};
+  esp_err_t config_error_once_{ESP_OK};
   esp_err_t callback_error_{ESP_OK};
   esp_err_t callback_failure_error_{ESP_OK};
   size_t callback_failures_remaining_{0U};
@@ -1549,6 +1558,76 @@ void test_csi_pipeline_aggregates_detection_timing_on_evaluation_ticks(void) {
 // LEGACY NORMALIZATION TESTS
 // ============================================================================
 
+void test_csi_pipeline_reconfigures_capture_and_retains_same_profile(void) {
+    LightweightDetector detector(10, 1.0f);
+    CsiPipeline manager;
+    manager.init(&detector, &g_wifi_mock);
+    TEST_ASSERT_EQUAL(CsiCaptureProfile::LLTF20, select_csi_capture_profile(6U, true));
+    TEST_ASSERT_EQUAL(CsiCaptureProfile::LLTF20, select_csi_capture_profile(36U, true));
+    TEST_ASSERT_EQUAL(ESP_OK, manager.enable(nullptr, CsiCaptureProfile::HT20));
+    int8_t csi_buf[128];
+    wifi_csi_info_t info{};
+    fill_valid_csi_info_(&info, csi_buf);
+    uint32_t timestamp = 1000000U;
+    process_timed_packets_(manager, info, timestamp, 2U);
+    TEST_ASSERT_EQUAL(2U, manager.detector_window_occupancy_slots());
+
+    TEST_ASSERT_EQUAL(ESP_OK, manager.reconfigure_capture(CsiCaptureProfile::LLTF20));
+    TEST_ASSERT_EQUAL(CsiCaptureProfile::LLTF20, manager.capture_profile());
+    TEST_ASSERT_EQUAL(0U, manager.detector_window_occupancy_slots());
+    info.rx_ctrl.sig_mode = 0U;
+    process_timed_packets_(manager, info, timestamp, 2U);
+    TEST_ASSERT_EQUAL(2U, manager.detector_window_occupancy_slots());
+    g_wifi_mock.clear_calls();
+    TEST_ASSERT_EQUAL(ESP_OK, manager.reconfigure_capture(CsiCaptureProfile::LLTF20));
+    TEST_ASSERT_TRUE(g_wifi_mock.calls().empty());
+    TEST_ASSERT_EQUAL(2U, manager.detector_window_occupancy_slots());
+
+    g_wifi_mock.fail_next_config_call(ESP_FAIL);
+    TEST_ASSERT_EQUAL(ESP_FAIL, manager.reconfigure_capture(CsiCaptureProfile::HT20));
+    TEST_ASSERT_EQUAL(CsiCaptureProfile::LLTF20, manager.capture_profile());
+    TEST_ASSERT_TRUE(manager.is_enabled());
+    TEST_ASSERT_EQUAL(ESP_OK, manager.reconfigure_capture(CsiCaptureProfile::HT20));
+    TEST_ASSERT_EQUAL(CsiCaptureProfile::HT20, manager.capture_profile());
+    TEST_ASSERT_EQUAL(ESP_OK, manager.disable());
+}
+
+void test_csi_pipeline_admits_local_ack_only_with_active_lltf20_profile(void) {
+    const uint8_t local_mac[6] = {0x10, 0x20, 0x30, 0x40, 0x50, 0x60};
+    uint8_t header[10] = {0xD4U, 0U, 0U, 0U};
+    std::memcpy(header + 4U, local_mac, sizeof(local_mac));
+    for (const auto profile : {CsiCaptureProfile::LLTF20, CsiCaptureProfile::HT20}) {
+        LightweightDetector detector(10, 1.0f);
+        CsiPipeline manager;
+        manager.init(&detector, &g_wifi_mock);
+        CsiFrameFilterConfig filter;
+        std::memcpy(filter.local_mac_addr, local_mac, sizeof(local_mac));
+        manager.set_traffic_filter(filter);
+        TEST_ASSERT_EQUAL(ESP_OK, manager.enable(nullptr, profile));
+
+        int8_t csi_buf[128];
+        wifi_csi_info_t info{};
+        fill_valid_csi_info_(&info, csi_buf);
+        info.hdr = header;
+        info.rx_ctrl.sig_len = sizeof(header) + 4U;
+        // Let both profiles pass their PHY gate to exercise the traffic filter.
+        info.rx_ctrl.sig_mode = profile == CsiCaptureProfile::LLTF20 ? 0U : 1U;
+        for (const uint32_t timestamp : {1000000U, 1010000U}) {
+            info.rx_ctrl.timestamp = timestamp;
+            g_wifi_mock.trigger_callback(&info);
+            manager.loop();
+        }
+        manager.flush_pending_candidate();
+
+        const bool use_lltf = profile == CsiCaptureProfile::LLTF20;
+        TEST_ASSERT_EQUAL(use_lltf ? 2U : 0U, manager.traffic_classified_packets_total());
+        TEST_ASSERT_EQUAL(use_lltf ? 0U : 2U, manager.traffic_rejected_packets_total());
+        TEST_ASSERT_EQUAL(use_lltf ? 2U : 0U, manager.accepted_packets_total());
+        TEST_ASSERT_EQUAL(use_lltf ? 2U : 0U, manager.detector_window_occupancy_slots());
+        TEST_ASSERT_EQUAL(ESP_OK, manager.disable());
+    }
+}
+
 void test_csi_pipeline_filters_unicast_frames_for_other_device(void) {
     LightweightDetector detector(10, 1.0f);
     CsiPipeline manager;
@@ -1585,6 +1664,8 @@ int process(void) {
     
     // Initialization tests
     RUN_TEST(test_csi_pipeline_init);
+    RUN_TEST(test_csi_pipeline_reconfigures_capture_and_retains_same_profile);
+    RUN_TEST(test_csi_pipeline_admits_local_ack_only_with_active_lltf20_profile);
     
     // Enable/Disable tests
     RUN_TEST(test_csi_pipeline_enable);

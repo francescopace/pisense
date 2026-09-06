@@ -593,6 +593,18 @@ void test_parse_espectre_command_parses_info_and_threshold_commands(void) {
       &error, &frontend_ota_protocol()));
   TEST_ASSERT_EQUAL_STRING("dns_tcp", command.traffic_generator_mode.c_str());
 
+  EspectreCommand direct_command;
+  TEST_ASSERT_TRUE(parse_espectre_command(
+      "{\"command_id\":\"raw\",\"command\":\"update_sensing\",\"traffic_generator_mode\":\"wifi_raw\"}",
+      &command, &error, &frontend_ota_protocol()));
+  TEST_ASSERT_TRUE(parse_espectre_command_request(
+      "raw", "update_sensing", "{\"traffic_generator_mode\":\"wifi_raw\"}",
+      &direct_command, &error, ESPECTRE_PROTOCOL_VERSION, &frontend_ota_protocol()));
+  TEST_ASSERT_TRUE(command.has_traffic_generator_mode);
+  TEST_ASSERT_TRUE(direct_command.has_traffic_generator_mode);
+  TEST_ASSERT_EQUAL_STRING("wifi_raw", command.traffic_generator_mode.c_str());
+  TEST_ASSERT_EQUAL_STRING(command.traffic_generator_mode.c_str(), direct_command.traffic_generator_mode.c_str());
+
 }
 
 void test_parse_espectre_command_rejects_missing_command_and_invalid_threshold(void) {
@@ -634,7 +646,7 @@ void test_parse_espectre_command_rejects_missing_command_and_invalid_threshold(v
 
   TEST_ASSERT_FALSE(parse_espectre_command(
       "{\"command_id\":\"test\",\"command\":\"update_sensing\",\"traffic_generator_mode\":\"udp\"}", &command, &error, &frontend_ota_protocol()));
-  TEST_ASSERT_EQUAL_STRING("invalid traffic generator mode (accepted: ping, dns, and dns_tcp)", error.c_str());
+  TEST_ASSERT_EQUAL_STRING("invalid traffic generator mode (accepted: ping, dns, dns_tcp, and wifi_raw)", error.c_str());
 
   TEST_ASSERT_TRUE(parse_espectre_command("{\"command_id\":\"test\",\"command\":\"check_ota\"}", &command, &error, &frontend_ota_protocol()));
 

@@ -42,6 +42,7 @@ namespace {
 void dummy_csi_callback(void *, wifi_csi_info_t *) {}
 
 struct CapturedCsiPacket {
+  std::array<int8_t, HT20_CSI_LEN> payload{};
   uint32_t callback_count{0U};
   int8_t first_value{0};
   int8_t retained_value{0};
@@ -104,6 +105,7 @@ void capture_csi_packet(void *context, const wifi_csi_info_t *info, const Normal
   captured->first_word_invalid = info == nullptr || info->first_word_invalid;
   captured->missing_lltf_bins_zero = normalized.valid();
   if (normalized.valid()) {
+    std::copy_n(normalized.data, normalized.len, captured->payload.data());
     for (uint8_t bin : HT20_LLTF_MISSING_BINS) {
       const size_t byte_index = static_cast<size_t>(bin) * 2U;
       captured->missing_lltf_bins_zero &=
@@ -191,7 +193,73 @@ void test_lltf20_profile_inherits_supported_ht20_payload_layouts(void) {
     }
 }
 
-void test_lltf20_legacy_frames_accept_only_one_full_width_lltf(void) {
+void test_compact_lltf_preserves_tones_and_bypasses_latched_classic_order(void) {
+    std::array<int8_t, LLTF20_CSI_LEN_SHORT> compact{};
+    std::array<int8_t, HT20_CSI_LEN> expected{};
+    for (int tone = -26; tone <= 26; ++tone) {
+      const size_t source = static_cast<size_t>(tone + 26) * 2U;
+      compact[source] = static_cast<int8_t>(tone);
+      compact[source + 1U] = static_cast<int8_t>(-tone);
+      expected[(tone + 32) * 2] = static_cast<int8_t>(tone);
+      expected[(tone + 32) * 2 + 1] = static_cast<int8_t>(-tone);
+    }
+    std::array<int8_t, HT20_CSI_LEN> scratch{};
+    scratch.fill(127);
+    const auto normalized = normalize_ht20_csi_payload(
+        compact.data(), compact.size(), scratch.data(), scratch.size());
+    TEST_ASSERT_TRUE(normalized.valid());
+    TEST_ASSERT_EQUAL(HT20_CSI_LEN, normalized.len);
+    TEST_ASSERT_TRUE(normalized.tag == NormalizedCSIPayloadTag::LLTF53_TO_64);
+    TEST_ASSERT_TRUE(std::equal(expected.begin(), expected.end(), normalized.data));
+    TEST_ASSERT_FALSE(normalize_ht20_csi_payload(
+        compact.data(), compact.size(), nullptr, scratch.size()).valid());
+    TEST_ASSERT_FALSE(normalize_ht20_csi_payload(
+        compact.data(), compact.size(), scratch.data(), scratch.size() - 1U).valid());
+
+    CsiCaptureService service;
+    CapturedCsiPacket captured;
+    service.init();
+    service.set_packet_callback(&capture_csi_packet, &captured);
+    TEST_ASSERT_EQUAL(ESP_OK, service.enable(CsiCaptureProfile::LLTF20));
+    // Establish classic ordering from a full-width packet before compact LLTF.
+    scratch.fill(7);
+    for (uint8_t bin : HT20_CLASSIC_ONLY_NULL_BINS) {
+      scratch[bin * 2U] = scratch[bin * 2U + 1U] = 0;
+    }
+    wifi_csi_info_t info{};
+    info.buf = scratch.data();
+    info.len = scratch.size();
+    info.rx_ctrl.channel = 6U;
+    info.rx_ctrl.timestamp = 100U;
+    service.process_packet(&info);
+    TEST_ASSERT_TRUE(captured.rotated_to_centered);
+    info.buf = compact.data();
+    info.len = compact.size();
+    info.rx_ctrl.timestamp++;
+    service.process_packet(&info);
+    TEST_ASSERT_EQUAL(2U, captured.callback_count);
+    TEST_ASSERT_EQUAL(LLTF20_CSI_LEN_SHORT, captured.info_len);
+    TEST_ASSERT_TRUE(expected == captured.payload);
+    TEST_ASSERT_FALSE(captured.rotated_to_centered);
+    TEST_ASSERT_TRUE(captured.missing_lltf_bins_zero);
+    TEST_ASSERT_EQUAL(ESP_OK, service.disable());
+
+    for (auto profile : {CsiCaptureProfile::LLTF20, CsiCaptureProfile::HT20,
+                         CsiCaptureProfile::VHT20}) {
+      for (uint8_t sig_mode : {0U, 1U, 3U}) {
+        info.rx_ctrl.sig_mode = sig_mode;
+        const auto assessment = assess_ht20_sensing_format(&info, profile);
+        const bool accepted = profile == CsiCaptureProfile::LLTF20 && sig_mode == 0U;
+        TEST_ASSERT_EQUAL(accepted, assessment.is_sensing_accepted());
+        if (accepted) {
+          TEST_ASSERT_TRUE(assessment.layout_id == CsiLayoutId::LLTF20_53);
+          TEST_ASSERT_TRUE(assessment.requires_normalization());
+        }
+      }
+    }
+}
+
+void test_lltf20_legacy_frames_reject_unrelated_payload_lengths(void) {
     std::array<int8_t, HT20_CSI_LEN_DOUBLE> csi{};
     wifi_csi_info_t info{};
     info.buf = csi.data();
@@ -691,7 +759,8 @@ int process(void) {
     RUN_TEST(test_wifi_csi_real_forwards_calls_to_mocked_esp_wifi);
     RUN_TEST(test_lltf_preference_and_vht_capability_resolve_capture_profile);
     RUN_TEST(test_lltf20_profile_inherits_supported_ht20_payload_layouts);
-    RUN_TEST(test_lltf20_legacy_frames_accept_only_one_full_width_lltf);
+    RUN_TEST(test_compact_lltf_preserves_tones_and_bypasses_latched_classic_order);
+    RUN_TEST(test_lltf20_legacy_frames_reject_unrelated_payload_lengths);
     RUN_TEST(test_csi_capture_service_normalizes_ht_layouts_under_lltf20);
     RUN_TEST(test_csi_capture_service_filters_duplicate_and_stale_timestamps);
     RUN_TEST(test_csi_capture_service_defers_channel_change_and_resets_session_baseline);

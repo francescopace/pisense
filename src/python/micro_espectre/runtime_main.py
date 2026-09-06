@@ -20,6 +20,7 @@ from src.device_utils import (
     NORMALIZATION_DOUBLE_HT20,
     NORMALIZATION_DOUBLE_HT57_TO_64,
     NORMALIZATION_HT57_TO_64,
+    NORMALIZATION_LLTF53_TO_64,
     assess_ht20_sensing_frame,
     impute_ht20_lltf_detector_bins,
     normalize_ht20_csi_payload,
@@ -304,8 +305,8 @@ def run_startup_calibration(wlan, detector, traffic_gen):
             if remap_tag in (NORMALIZATION_DOUBLE_HT20, NORMALIZATION_DOUBLE_HT57_TO_64) and not collapse_logged:
                 print_log("INFO", "CSI double-length collapse active: 256->128 and/or 228->114")
                 collapse_logged = True
-            if remap_tag in (NORMALIZATION_HT57_TO_64, NORMALIZATION_DOUBLE_HT57_TO_64) and not remap_logged:
-                print_log("INFO", "CSI remap active: 57->64 SC (left_pad=4, right_pad=3)")
+            if remap_tag in (NORMALIZATION_LLTF53_TO_64, NORMALIZATION_HT57_TO_64, NORMALIZATION_DOUBLE_HT57_TO_64) and not remap_logged:
+                print_log("INFO", "CSI compact payload remap active: 53/57->64 SC")
                 remap_logged = True
             del frame
             current_timestamp_us = frame_result[4]
@@ -978,8 +979,8 @@ def main(wlan=None):
                 if remap_tag in (NORMALIZATION_DOUBLE_HT20, NORMALIZATION_DOUBLE_HT57_TO_64) and not collapse_logged:
                     print_log("INFO", "CSI double-length collapse active: 256->128 and/or 228->114")
                     collapse_logged = True
-                if remap_tag in (NORMALIZATION_HT57_TO_64, NORMALIZATION_DOUBLE_HT57_TO_64) and not remap_logged:
-                    print_log("INFO", "CSI remap active: 57->64 SC (left_pad=4, right_pad=3)")
+                if remap_tag in (NORMALIZATION_LLTF53_TO_64, NORMALIZATION_HT57_TO_64, NORMALIZATION_DOUBLE_HT57_TO_64) and not remap_logged:
+                    print_log("INFO", "CSI compact payload remap active: 53/57->64 SC")
                     remap_logged = True
                 packet_channel = frame[1]
 

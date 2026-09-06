@@ -9,14 +9,24 @@
  */
 #include "test_harness.h"
 #include <cstdint>
+#include <cstring>
+#include "esp_wifi.h"
 #include "traffic_generator_manager.h"
+#include "sdkconfig.h"
 #include "esphome/core/log.h"
 
 using namespace espectre;
 
+namespace {
+TrafficGeneratorManager *active_generator = nullptr;
+void stop_raw_test_generator() {
+    // The FreeRTOS mock runs the task synchronously; stop after bounded sends.
+    if (g_esp_wifi_mock.raw_tx_call_count == 3) active_generator->stop();
+}
+}  // namespace
 
 void setUp(void) {
-    // Nothing to set up
+    esp_wifi_mock_reset();
 }
 
 void tearDown(void) {
@@ -26,6 +36,90 @@ void tearDown(void) {
 // ============================================================================
 // SEND ERROR STATE TESTS
 // ============================================================================
+
+void test_wifi_raw_targets_current_bssid_without_gateway_and_counts_sends(void) {
+    TrafficGeneratorManager manager;
+    active_generator = &manager;
+    g_esp_wifi_mock.raw_tx_hook = stop_raw_test_generator;
+    const uint8_t bssid[6] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    std::memcpy(g_esp_wifi_mock.current_ap_info.bssid, bssid, 6U);
+    for (const esp_err_t result : {ESP_OK, ESP_ERR_NO_MEM, ESP_FAIL}) {
+        g_esp_wifi_mock.raw_tx_call_count = 0;
+        g_esp_wifi_mock.raw_tx_result = result;
+        manager.init(100U, RuntimeTrafficMode::WIFI_RAW);
+        TEST_ASSERT_TRUE(manager.start(0U));
+        TEST_ASSERT_EQUAL(WIFI_IF_STA, g_esp_wifi_mock.raw_tx_interface);
+        TEST_ASSERT_TRUE(g_esp_wifi_mock.raw_tx_sys_seq);
+        TEST_ASSERT_EQUAL(24, g_esp_wifi_mock.raw_tx_length);
+        const uint8_t *frame = g_esp_wifi_mock.raw_tx_frame;
+        TEST_ASSERT_EQUAL_UINT8(0x48U, frame[0]);
+        TEST_ASSERT_EQUAL_UINT8(0x01U, frame[1]);
+        TEST_ASSERT_EQUAL_UINT8_ARRAY(g_esp_wifi_mock.current_ap_info.bssid, frame + 4U, 6U);
+        TEST_ASSERT_EQUAL_UINT8_ARRAY(g_esp_wifi_mock.mac, frame + 10U, 6U);
+        TEST_ASSERT_EQUAL_UINT8_ARRAY(g_esp_wifi_mock.current_ap_info.bssid, frame + 16U, 6U);
+        TEST_ASSERT_EQUAL(0U, frame[22]);
+        TEST_ASSERT_EQUAL(0U, frame[23]);
+        TEST_ASSERT_EQUAL(result == ESP_OK ? 3U : 0U, manager.send_success_count());
+        TEST_ASSERT_EQUAL(result == ESP_OK ? 0U : 3U, manager.send_error_count());
+        TEST_ASSERT_EQUAL(100U, manager.current_rate_pps());
+        TEST_ASSERT_FALSE(manager.is_running());
+        // A later association must rebuild the destination before sending.
+        ++g_esp_wifi_mock.current_ap_info.bssid[5];
+    }
+    TEST_ASSERT_EQUAL(3, g_esp_wifi_mock.get_ap_info_call_count);
+}
+
+void test_wifi_raw_uses_ofdm_for_each_band_and_rejects_rate_configuration_failure(void) {
+    TrafficGeneratorManager manager;
+    active_generator = &manager;
+    g_esp_wifi_mock.raw_tx_hook = stop_raw_test_generator;
+    g_esp_wifi_mock.current_ap_info.bssid[0] = 0x02U;
+#if !(CONFIG_IDF_TARGET_ESP32C5 || CONFIG_IDF_TARGET_ESP32C6)
+    const uint8_t channels[] = {10U};
+#else
+    const uint8_t channels[] = {10U, 48U};
+#endif
+    for (uint8_t channel : channels) {
+        g_esp_wifi_mock.current_ap_info.primary = channel;
+        g_esp_wifi_mock.raw_tx_call_count = 0;
+        manager.init(100U, RuntimeTrafficMode::WIFI_RAW);
+        TEST_ASSERT_TRUE(manager.start(0U));
+        TEST_ASSERT_EQUAL(WIFI_IF_STA, g_esp_wifi_mock.raw_rate_interface);
+        TEST_ASSERT_EQUAL(WIFI_PHY_RATE_6M, g_esp_wifi_mock.raw_rate_config.rate);
+#if !(CONFIG_IDF_TARGET_ESP32C5 || CONFIG_IDF_TARGET_ESP32C6)
+        TEST_ASSERT_TRUE(g_esp_wifi_mock.raw_rate_legacy);
+#else
+        TEST_ASSERT_FALSE(g_esp_wifi_mock.raw_rate_legacy);
+        TEST_ASSERT_EQUAL(channel > 14U ? WIFI_PHY_MODE_11A : WIFI_PHY_MODE_11G,
+                          g_esp_wifi_mock.raw_rate_config.phymode);
+        TEST_ASSERT_FALSE(g_esp_wifi_mock.raw_rate_config.ersu);
+        TEST_ASSERT_FALSE(g_esp_wifi_mock.raw_rate_config.dcm);
+#endif
+    }
+    g_esp_wifi_mock.raw_tx_call_count = 0;
+    g_esp_wifi_mock.raw_rate_result = ESP_FAIL;
+    manager.init(100U, RuntimeTrafficMode::WIFI_RAW);
+    TEST_ASSERT_FALSE(manager.start(0U));
+    TEST_ASSERT_FALSE(manager.is_running());
+    TEST_ASSERT_EQUAL(0U, g_esp_wifi_mock.raw_tx_call_count);
+}
+
+void test_wifi_raw_requires_association_and_valid_station_identity(void) {
+    TrafficGeneratorManager manager;
+    manager.init(100U, RuntimeTrafficMode::WIFI_RAW);
+    g_esp_wifi_mock.get_ap_info_result = ESP_ERR_WIFI_NOT_CONNECT;
+    TEST_ASSERT_FALSE(manager.start(0U));
+    g_esp_wifi_mock.get_ap_info_result = ESP_OK;
+    TEST_ASSERT_FALSE(manager.start(0U));
+    g_esp_wifi_mock.current_ap_info.bssid[0] = 0x02U;
+    g_esp_wifi_mock.get_mac_result = ESP_FAIL;
+    TEST_ASSERT_FALSE(manager.start(0U));
+    TEST_ASSERT_EQUAL(0, g_esp_wifi_mock.raw_tx_call_count);
+    uint8_t frame[24]{};
+    TEST_ASSERT_EQUAL(0U, build_null_data_frame(nullptr, g_esp_wifi_mock.mac, frame, sizeof(frame)));
+    TEST_ASSERT_EQUAL(0U, build_null_data_frame(g_esp_wifi_mock.current_ap_info.bssid,
+                                               g_esp_wifi_mock.mac, frame, sizeof(frame) - 1U));
+}
 
 void test_send_error_state_initialization(void) {
     SendErrorState state;
@@ -231,6 +325,9 @@ int process(void) {
     
     // SendErrorState tests
     RUN_TEST(test_send_error_state_initialization);
+    RUN_TEST(test_wifi_raw_targets_current_bssid_without_gateway_and_counts_sends);
+    RUN_TEST(test_wifi_raw_uses_ofdm_for_each_band_and_rejects_rate_configuration_failure);
+    RUN_TEST(test_wifi_raw_requires_association_and_valid_station_identity);
     
     // handle_send_error tests
     RUN_TEST(test_handle_send_error_increments_count);

@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "csi_capture_profile.h"
 #include "csi_traffic_types.h"
 #include "esp_wifi.h"
 #include "runtime_sensing_schema.h"
@@ -30,8 +31,9 @@ struct CsiFrameFilterConfig {
   uint8_t local_mac_addr[6]{};
 };
 
-/** Match a CSI callback to the configured ESPectre traffic source. */
+/** Match configured traffic or, in LLTF20, an 802.11 ACK to the local station. */
 bool csi_frame_matches_traffic(const wifi_csi_info_t *info,
-                               const CsiFrameFilterConfig &config);
+                               const CsiFrameFilterConfig &config,
+                               CsiCaptureProfile profile);
 
 }  // namespace espectre

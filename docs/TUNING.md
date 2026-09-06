@@ -130,7 +130,7 @@ If occupancy remains below 70%:
 
 The runtime never changes the target automatically because doing so would change feature timing.
 
-The sensing frontends support internal `ping`, `dns`, and `dns_tcp`. Ping sends ICMP echo requests, `dns` sends connectionless UDP/53 queries, and `dns_tcp` uses a persistent, non-blocking TCP connection to gateway port `53`. The published product configurations use ping. Select the mode that remains stable with the deployed device, driver, AP, and gateway resolver; the runtime does not fall back automatically.
+The C++ sensing frontends support internal `ping`, `dns`, `dns_tcp`, and `wifi_raw`. Ping sends ICMP echo requests, `dns` sends connectionless UDP/53 queries, and `dns_tcp` uses a persistent, non-blocking TCP connection to gateway port `53`. `wifi_raw` sends Null Data directly to the AP and selects LLTF20 for ACK capture; [SETUP.md](SETUP.md) describes its runtime transitions and compatibility limits. The published product configurations use ping. Select the mode that remains stable with the deployed device, driver, AP, and gateway resolver; the runtime does not fall back automatically.
 
 Rules of thumb:
 

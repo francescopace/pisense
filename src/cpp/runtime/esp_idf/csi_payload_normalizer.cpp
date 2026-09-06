@@ -37,7 +37,20 @@ NormalizedCSIPayload normalize_ht20_csi_payload(const int8_t *csi_data,
     return {csi_data, HT20_CSI_LEN, tag, false};
   }
 
-  if (csi_len != HT20_CSI_LEN_SHORT || remap_buffer == nullptr || remap_buffer_len < HT20_CSI_LEN) {
+  if (remap_buffer == nullptr || remap_buffer_len < HT20_CSI_LEN) {
+    return {};
+  }
+
+  if (csi_len == LLTF20_CSI_LEN_SHORT) {
+    // C5 compact LLTF is already centered: -26..+26, with DC at pair 26.
+    // Pad six bins on the left and five on the right to keep DC at bin 32.
+    std::memset(remap_buffer, 0, HT20_CSI_LEN);
+    std::memcpy(remap_buffer + (HT20_DC_SUBCARRIER - 26U) * 2U,
+                csi_data, LLTF20_CSI_LEN_SHORT);
+    return {remap_buffer, HT20_CSI_LEN, NormalizedCSIPayloadTag::LLTF53_TO_64, false};
+  }
+
+  if (csi_len != HT20_CSI_LEN_SHORT) {
     return {};
   }
 
@@ -62,6 +75,8 @@ const char *normalized_csi_payload_tag_to_string(NormalizedCSIPayloadTag tag) {
       return "ht57_to_64";
     case NormalizedCSIPayloadTag::DOUBLE_HT57_TO_64:
       return "double_ht57_to_64";
+    case NormalizedCSIPayloadTag::LLTF53_TO_64:
+      return "lltf53_to_64";
     default:
       return "unknown";
   }

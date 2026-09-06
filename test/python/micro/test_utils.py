@@ -56,6 +56,53 @@ from utils import (
 class TestNormalizeHt20CsiPayload:
     """Test HT20 CSI payload normalization/remap scenarios."""
 
+    def test_c5_ack_capture_keeps_dc_centered(self):
+        # Pre-normalization C5 ACK, ESP-IDF 5.5.5, channel 10, 2026-09-07.
+        # The documentation's wraparound order would move DC away from bin 32.
+        payload = bytes.fromhex(
+            "f8f0fdf503fb09000f051409190c1d0e200f2410250e250d250c230a1f081a0613030b02"
+            "0201f900ee00e400db00d2fecdffc9000000c900cbffd2ffd900e4feeefefafd06fd10fb"
+            "1af922f828f62cf52ef32ff02dee2bee25ed1fee17f00ff206f7fdfbf401eb06e30b"
+        )
+        assert [i for i in range(53) if payload[i * 2:i * 2 + 2] == b"\x00\x00"] == [26]
+        normalized, _, _ = normalize_ht20_csi_payload(payload)
+        assert [i for i in range(6, 59) if normalized[i * 2:i * 2 + 2] == b"\x00\x00"] == [32]
+        assert normalized[64:66] == b"\x00\x00"
+
+    def test_compact_lltf_preserves_physical_tones_and_zero_fills_missing_bins(self):
+        tones = list(range(-26, 27))
+        payload = bytes(value & 255 for tone in tones for value in (tone, -tone))
+        buffer = bytearray([127] * 128)
+        state = CsiPayloadNormalizationState()
+        state.bin_layout = LAYOUT_BINS_CLASSIC
+        normalized, raw_len, tag = normalize_ht20_csi_payload(
+            payload, remap_buffer=buffer, state=state
+        )
+        assert normalized is buffer
+        assert raw_len == 106
+        assert tag == "lltf53_to_64"
+        for tone in range(-32, 32):
+            index = (tone + 32) * 2
+            expected = bytes((tone & 255, (-tone) & 255)) if -26 <= tone <= 26 else b"\x00\x00"
+            assert normalized[index:index + 2] == expected
+        detector_view = impute_ht20_lltf_detector_bins(normalized)
+        assert normalized[8:12] == b"\x00" * 4
+        assert normalized[118:122] == b"\x00" * 4
+        assert detector_view[8:10] == normalized[12:14]
+        assert detector_view[120:122] == normalized[116:118]
+
+    @pytest.mark.parametrize("mode,width,allow,accepted", [
+        (0, 0, True, True), (0, 0, False, False),
+        (1, 0, True, False), (3, 0, True, False), (0, 1, True, False),
+    ])
+    def test_compact_lltf_requires_legacy_phy(self, mode, width, allow, accepted):
+        frame = [0] * 10
+        frame[7], frame[9] = mode, width
+        assessment = assess_ht20_sensing_frame(
+            frame, bytes(106), allow_legacy_lltf=allow
+        )
+        assert (assessment["disposition"] == DISPOSITION_SENSE) == accepted
+
     def test_passthrough_128_bytes(self):
         payload = bytes(range(128))
         normalized, raw_len, tag = normalize_ht20_csi_payload(payload, expected_len=128)

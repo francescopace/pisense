@@ -785,10 +785,107 @@ void test_runtime_channel_change_cold_resets_ml_without_calibration(void) {
   runtime.csi_traffic_service_.stop();
 }
 
+void test_runtime_reassociation_restarts_traffic_without_ip_or_channel_change(void) {
+  for (const bool reports_disconnect : {false, true}) {
+    esp_event_mock_reset();
+    esp_netif_mock_reset();
+    esp_wifi_mock_reset();
+    g_esp_netif_mock.ip_addr = 0U;
+    RuntimeConfig config;
+    config.detection_algorithm = DetectionAlgorithm::HIGH_ACCURACY;
+    config.segmentation_threshold = 0.73f;
+    config.traffic_generator_mode = RuntimeTrafficMode::WIFI_RAW;
+    FakeCsiTrafficGenerator traffic_generator;
+    FakeCsiTrafficIngress traffic_ingress;
+    EspIdfRuntime runtime(config, traffic_generator, traffic_ingress);
+    TEST_ASSERT_TRUE(runtime.setup());
+    esp_event_mock_emit(WIFI_EVENT, WIFI_EVENT_STA_START, nullptr);
+    ip_event_got_ip_t ip{};
+    ip.ip_info.ip.addr = 0x3701A8C0U;
+    ip.ip_info.gw.addr = 0x0101A8C0U;
+    ip.ip_info.netmask.addr = g_esp_netif_mock.netmask_addr;
+    g_esp_netif_mock.ip_addr = ip.ip_info.ip.addr;
+    g_esp_netif_mock.gw_addr = ip.ip_info.gw.addr;
+    esp_event_mock_emit(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+    TEST_ASSERT_EQUAL(ESP_OK, runtime.wifi_lifecycle_.process_pending_events());
+    TEST_ASSERT_TRUE(traffic_generator.is_running());
+    const uint32_t starts = traffic_generator.start_calls;
+    const uint32_t stops = traffic_generator.stop_calls;
+    if (reports_disconnect) {
+      wifi_event_sta_disconnected_t disconnect{};
+      disconnect.reason = WIFI_REASON_ROAMING;
+      esp_event_mock_emit(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnect);
+    }
+    ++g_esp_wifi_mock.current_ap_info.bssid[5];
+    esp_event_mock_emit(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, nullptr);
+    TEST_ASSERT_EQUAL(ESP_OK, runtime.wifi_lifecycle_.process_pending_events());
+    TEST_ASSERT_FALSE(traffic_generator.is_running());
+    TEST_ASSERT_TRUE(traffic_generator.stop_calls > stops);
+    TEST_ASSERT_TRUE(runtime.csi_receive_path_refresh_in_progress_);
+    wifi_event_sta_scan_done_t scan_done{};
+    esp_event_mock_emit(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, &scan_done);
+    TEST_ASSERT_EQUAL(ESP_OK, runtime.wifi_lifecycle_.process_pending_events());
+    TEST_ASSERT_TRUE(traffic_generator.is_running());
+    TEST_ASSERT_EQUAL(starts + 1U, traffic_generator.start_calls);
+    TEST_ASSERT_EQUAL(RuntimeTrafficMode::WIFI_RAW, traffic_generator.mode);
+    TEST_ASSERT_EQUAL(ip.ip_info.gw.addr, traffic_generator.gateway_addr);
+    TEST_ASSERT_EQUAL_FLOAT(0.73f, runtime.get_snapshot().threshold);
+    TEST_ASSERT_FALSE(runtime.is_calibrating());
+    esp_event_mock_emit(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+    TEST_ASSERT_EQUAL(ESP_OK, runtime.wifi_lifecycle_.process_pending_events());
+    TEST_ASSERT_EQUAL(starts + 1U, traffic_generator.start_calls);
+    runtime.shutdown();
+  }
+}
+
+void test_wifi_raw_switch_preserves_ml_threshold_and_recalibrates_lightweight_only(void) {
+  for (const auto algorithm : {DetectionAlgorithm::HIGH_ACCURACY, DetectionAlgorithm::LIGHTWEIGHT}) {
+    nvs_mock_reset();
+    RuntimeConfig config;
+    config.detection_algorithm = algorithm;
+    config.segmentation_threshold = 0.73f;
+    FakeCsiTrafficGenerator generator;
+    FakeCsiTrafficIngress ingress;
+    EspIdfRuntime runtime(config, generator, ingress);
+    DetectorListener listener;
+    runtime.set_listener(&listener);
+    TEST_ASSERT_TRUE(runtime.setup());
+    esp_netif_ip_info_t ip_info{};
+    ip_info.ip.addr = 0x1101A8C0U;
+    ip_info.gw.addr = 0x0101A8C0U;
+    runtime.on_wifi_connected_(ip_info);
+    runtime.cancel_calibration_(false);
+    const int calibration_starts = listener.calibration_starts;
+    const int calibration_finishes = listener.calibration_finishes;
+    const uint32_t configure_calls = runtime.csi_pipeline_.capture_service_.enable_attempts();
+    TEST_ASSERT_TRUE(runtime.set_traffic_generator_mode_runtime(RuntimeTrafficMode::WIFI_RAW));
+    TEST_ASSERT_EQUAL(RuntimeTrafficMode::WIFI_RAW, generator.mode);
+    TEST_ASSERT_EQUAL(CsiCaptureProfile::LLTF20, runtime.get_snapshot().csi_capture_profile);
+    // Classic ESP32 already captures LLTF20: switching the source leaves CSI armed.
+    TEST_ASSERT_EQUAL(configure_calls, runtime.csi_pipeline_.capture_service_.enable_attempts());
+    TEST_ASSERT_EQUAL(algorithm == DetectionAlgorithm::LIGHTWEIGHT, runtime.is_calibrating());
+    TEST_ASSERT_EQUAL(calibration_starts + (algorithm == DetectionAlgorithm::LIGHTWEIGHT ? 1 : 0),
+                      listener.calibration_starts);
+    TEST_ASSERT_EQUAL(calibration_finishes, listener.calibration_finishes);
+    TEST_ASSERT_EQUAL_FLOAT(0.73f, runtime.get_snapshot().threshold);
+    RuntimeTrafficMode saved{};
+    bool has_saved = false;
+    TEST_ASSERT_EQUAL(ESP_OK, load_runtime_traffic_generator_mode(&saved, &has_saved));
+    TEST_ASSERT_TRUE(has_saved);
+    TEST_ASSERT_EQUAL(RuntimeTrafficMode::WIFI_RAW, saved);
+    TEST_ASSERT_TRUE(runtime.set_csi_traffic_mode_runtime(CsiTrafficMode::EXTERNAL));
+    TEST_ASSERT_TRUE(runtime.set_traffic_generator_mode_runtime(RuntimeTrafficMode::PING));
+    TEST_ASSERT_EQUAL(CsiCaptureProfile::LLTF20, runtime.get_snapshot().csi_capture_profile);
+    runtime.stop_sensing_services_();
+  }
+}
+
 int main(int argc, char **argv) {
   (void)argc;
   (void)argv;
   UNITY_BEGIN();
+  RUN_TEST(test_runtime_reassociation_restarts_traffic_without_ip_or_channel_change);
+  RUN_TEST(test_wifi_raw_switch_preserves_ml_threshold_and_recalibrates_lightweight_only);
   RUN_TEST(test_runtime_calibration_consumes_evaluations_resets_on_gaps_and_finishes);
   RUN_TEST(test_runtime_rejects_invalid_detector_geometry_before_starting_services);
   RUN_TEST(test_runtime_rejects_invalid_or_unpersisted_controls_without_changing_config);

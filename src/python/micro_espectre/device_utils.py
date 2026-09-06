@@ -15,6 +15,7 @@ except ImportError:
 
 HT20_CSI_LEN = 128
 HT20_CSI_LEN_DOUBLE = 256
+LLTF20_CSI_LEN_SHORT = 106
 HT20_CSI_LEN_SHORT = 114
 HT20_CSI_LEN_SHORT_DOUBLE = 228
 HT20_CSI_SHORT_LEFT_PAD = 8
@@ -42,6 +43,7 @@ FORMAT_ID_HT20 = "ht20"
 LAYOUT_ID_UNKNOWN = "unknown"
 LAYOUT_ID_HT20_64 = "ht20_64"
 LAYOUT_ID_HT20_57 = "ht20_57"
+LAYOUT_ID_LLTF20_53 = "lltf20_53"
 LAYOUT_ID_HT20_64_DOUBLE = "ht20_64_double"
 LAYOUT_ID_HT20_57_DOUBLE = "ht20_57_double"
 
@@ -79,6 +81,7 @@ REASON_UNKNOWN_LAYOUT = "unknown_layout"
 REASON_MISSING_METADATA = "missing_metadata"
 NORMALIZATION_DOUBLE_HT20 = "double_ht20"
 NORMALIZATION_HT57_TO_64 = "ht57_to_64"
+NORMALIZATION_LLTF53_TO_64 = "lltf53_to_64"
 NORMALIZATION_DOUBLE_HT57_TO_64 = "double_ht57_to_64"
 DETECTOR_RESET_DROP_STREAK = 8
 
@@ -238,6 +241,10 @@ def assess_ht20_payload_layout(raw_len, *, expected_len=HT20_CSI_LEN, out=None):
         layout_id = LAYOUT_ID_HT20_64
         payload_view = PAYLOAD_VIEW_RAW
         normalization_id = None
+    elif raw_len == LLTF20_CSI_LEN_SHORT:
+        layout_id = LAYOUT_ID_LLTF20_53
+        payload_view = PAYLOAD_VIEW_NORMALIZED
+        normalization_id = NORMALIZATION_LLTF53_TO_64
     elif raw_len == HT20_CSI_LEN_SHORT:
         layout_id = LAYOUT_ID_HT20_57
         payload_view = PAYLOAD_VIEW_NORMALIZED
@@ -363,6 +370,12 @@ def assess_ht20_sensing_frame(frame, csi_data, *, expected_len=HT20_CSI_LEN,
         out=out,
     )
     if assessment["reason_code"] != REASON_NONE:
+        return assessment
+    if raw_len == LLTF20_CSI_LEN_SHORT and not (
+            allow_legacy_lltf and not metadata_missing and frame_len > 9
+            and frame[7] == 0 and frame[9] == 0):
+        assessment["disposition"] = DISPOSITION_DROP
+        assessment["reason_code"] = REASON_UNEXPECTED_LTF
         return assessment
     if layout_assessment["reason_code"] != REASON_NONE:
         assessment["disposition"] = DISPOSITION_DROP
@@ -518,6 +531,16 @@ def normalize_ht20_csi_payload(csi_data, expected_len=128, remap_buffer=None,
 
     if expected_len != HT20_CSI_LEN:
         return None, raw_len, None
+
+    if normalization_id == NORMALIZATION_LLTF53_TO_64:
+        if remap_buffer is None or len(remap_buffer) != expected_len:
+            remap_buffer = bytearray(expected_len)
+        # C5 compact LLTF is centered: -26..+26, with DC at pair 26.
+        # Pad six bins on the left and five on the right; DC lands at bin 32.
+        remap_buffer[:12] = b"\x00" * 12
+        remap_buffer[118:] = b"\x00" * 10
+        remap_buffer[12:118] = csi_data
+        return remap_buffer, raw_len, NORMALIZATION_LLTF53_TO_64
 
     short_double_collapsed = False
     working_len = raw_len

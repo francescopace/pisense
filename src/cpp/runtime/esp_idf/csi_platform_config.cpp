@@ -14,13 +14,14 @@
 namespace espectre {
 
 wifi_csi_config_t build_csi_config(CsiCaptureProfile profile) {
+  const bool use_lltf = csi_capture_profile_uses_lltf(profile);
 #if CONFIG_IDF_TARGET_ESP32C5
   const bool use_vht = profile == CsiCaptureProfile::VHT20;
   return wifi_csi_config_t{
       .enable = 1,
-      .acquire_csi_legacy = 0,
+      .acquire_csi_legacy = use_lltf,
       .acquire_csi_force_lltf = 0,
-      .acquire_csi_ht20 = !use_vht,
+      .acquire_csi_ht20 = !use_vht && !use_lltf,
       .acquire_csi_ht40 = 0,
       .acquire_csi_vht = use_vht,
       .acquire_csi_su = 0,
@@ -29,16 +30,15 @@ wifi_csi_config_t build_csi_config(CsiCaptureProfile profile) {
       .acquire_csi_beamformed = 0,
       .acquire_csi_he_stbc_mode = 0,
       .val_scale_cfg = 0,
-      .dump_ack_en = 0,
-      .lltf_bit_mode = 0,
+      .dump_ack_en = use_lltf,
+      .lltf_bit_mode = use_lltf,
       .reserved = 0,
   };
 #elif CONFIG_IDF_TARGET_ESP32C6
-  (void) profile;
   return wifi_csi_config_t{
       .enable = 1,
-      .acquire_csi_legacy = 0,
-      .acquire_csi_ht20 = 1,
+      .acquire_csi_legacy = use_lltf,
+      .acquire_csi_ht20 = !use_lltf,
       .acquire_csi_ht40 = 0,
       .acquire_csi_su = 0,
       .acquire_csi_mu = 0,
@@ -46,11 +46,10 @@ wifi_csi_config_t build_csi_config(CsiCaptureProfile profile) {
       .acquire_csi_beamformed = 0,
       .acquire_csi_he_stbc = 0,
       .val_scale_cfg = 0,
-      .dump_ack_en = 0,
+      .dump_ack_en = use_lltf,
       .reserved = 0,
   };
 #else
-  const bool use_lltf = csi_capture_profile_uses_lltf(profile);
   return wifi_csi_config_t{
       .lltf_en = use_lltf,
       .htltf_en = !use_lltf,
@@ -59,7 +58,7 @@ wifi_csi_config_t build_csi_config(CsiCaptureProfile profile) {
       .channel_filter_en = false,
       .manu_scale = false,
       .shift = 0,
-      .dump_ack_en = false,
+      .dump_ack_en = use_lltf,
   };
 #endif
 }

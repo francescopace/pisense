@@ -26,6 +26,7 @@ idf_component_register(
         espectre_core
         esp_netif
         esp_timer
+        esp_wifi
         freertos
         lwip
 )

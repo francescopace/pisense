@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-08-28
-- Updated: 2026-08-29
+- Updated: 2026-09-06
 
 ## Context
 
@@ -35,13 +35,15 @@ These results show that incidental Direct, SSE, and ambient packets do not relia
 
 ## Decision
 
-Keep configured traffic provenance as a live detector admission gate:
+Keep configured traffic provenance as a live detector admission gate for IP traffic:
 
 - in external mode, admit only a canonical UDP marker or a unicast ICMP Echo Request matching the device destination identity;
 - in internal mode, admit only traffic matching the configured managed ping or DNS source;
 - reject otherwise valid incidental Direct, SSE, and ambient traffic before temporal detector admission;
 - keep `csi_target_pps=100`, the `100 pps` detector grid, and a fixed `100 pps` external generator for the current ESP32-S3 setup; and
 - do not implement an occupancy-driven or excess-driven traffic controller from this experiment.
+
+The shared C++ runtime additionally admits 802.11 ACK control frames in `lltf20`, independently of traffic ownership or generator mode. ACK admission requires a valid 14-byte frame including FCS, an error-free RX status, and a receiver address matching the configured local unicast MAC. Missing headers, other control subtypes, and ACKs in `ht20` or `vht20` are rejected. ACKs have no transmitter address or IP payload, so this exception identifies the local receiver without attributing the frame to a particular generator request. Existing PHY, channel, timestamp, and temporal sampling gates still apply. The occupancy and detector-quality effects have not yet been measured.
 
 The experiment-specific benchmark changes are removed after recording the evidence. Existing general benchmark facilities remain outside this decision and are unchanged.
 
@@ -55,6 +57,7 @@ Local raw samples, manifests, analyses, and summaries remain under `data/untrack
 | 2026-08-28 | Reduce the external generator to 90 pps, then 85 pps, while incidental traffic fills the grid | Rejected; 90 pps reached only 70.73 admitted pps and 70.95% occupancy, so 85 pps was not run |
 | 2026-08-28 | Retain provenance-filtered detector admission and the fixed 100 pps external source | Accepted |
 | 2026-08-29 | Add bounded ICMP Echo Requests to the explicit external provenance set | Accepted; unlike the rejected open filter, this admits one exact diagnostic packet shape rather than incidental local traffic |
+| 2026-09-06 | Admit local 802.11 ACKs in the shared C++ LLTF20 path | Accepted as a profile-specific supplement; IP provenance gates remain in place, and occupancy gains require hardware validation |
 
 ## Alternatives Considered
 
@@ -72,7 +75,7 @@ Rejected. It missed both acceptance criteria by roughly 9 pps and 9 percentage p
 
 ## Consequences
 
-The live detector receives an explicitly managed traffic source with bounded, deterministic provenance. Direct and SSE activity remains observable through transport diagnostics but cannot silently change sensing coverage or detector load. An operator can supply UDP markers or unicast Echo Requests in `external`; mixing them remains the external sender's responsibility. The external generator continues to cost `100 pps` on this setup, and future reductions require a managed replacement source or new evidence rather than relying on ambient traffic.
+The live detector receives an explicitly managed IP traffic source with bounded, deterministic provenance. In the shared C++ `lltf20` path, local ACKs can supplement that source, including ACKs caused by device-originated Direct or MQTT traffic; those ACKs can affect coverage and detector load. Other profiles retain the managed-traffic-only gate. An operator can supply UDP markers or unicast Echo Requests in `external`; mixing them remains the external sender's responsibility. The external generator continues to cost `100 pps` on this setup, and future reductions require a managed replacement source or new evidence rather than relying on ambient traffic.
 
 ## Related
 

@@ -56,11 +56,14 @@ enum class RuntimeTrafficMode {
   DNS,
   /** Length-prefixed DNS queries over a persistent TCP connection. */
   DNS_TCP,
+  /** Raw Wi-Fi Null Data frames addressed to the associated AP. */
+  WIFI_RAW,
 };
 
 constexpr const char *const RUNTIME_TRAFFIC_GENERATOR_MODE_PING_NAME = "ping";
 constexpr const char *const RUNTIME_TRAFFIC_GENERATOR_MODE_DNS_NAME = "dns";
 constexpr const char *const RUNTIME_TRAFFIC_GENERATOR_MODE_DNS_TCP_NAME = "dns_tcp";
+constexpr const char *const RUNTIME_TRAFFIC_GENERATOR_MODE_WIFI_RAW_NAME = "wifi_raw";
 constexpr const char *const RUNTIME_TRAFFIC_GENERATOR_MODE_DEFAULT_NAME = "ping";
 
 constexpr const char *const RUNTIME_CSI_TRAFFIC_MODE_INTERNAL_NAME = "internal";
@@ -139,7 +142,7 @@ constexpr bool runtime_profile_valid(RuntimeProfile profile) {
 
 constexpr bool runtime_traffic_mode_valid(RuntimeTrafficMode mode) {
   return mode == RuntimeTrafficMode::PING || mode == RuntimeTrafficMode::DNS ||
-         mode == RuntimeTrafficMode::DNS_TCP;
+         mode == RuntimeTrafficMode::DNS_TCP || mode == RuntimeTrafficMode::WIFI_RAW;
 }
 
 constexpr bool runtime_csi_traffic_mode_valid(CsiTrafficMode mode) {

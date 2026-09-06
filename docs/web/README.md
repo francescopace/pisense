@@ -103,6 +103,8 @@ Keep Analytics parameters low-cardinality. They must not include device IDs, net
 
 `assets/js/espectre-direct.js` owns resource-oriented Direct HTTP, incremental SSE parsing, abort, and reconnect behavior. Device settings and the live tools share one connection picker with Local connection, Demo, and the planned Remote connection. Relay support is not implemented. The wire contract and capability boundaries are in [API.md](../API.md).
 
+The shared Local connection panel states the minimum supported device firmware, ESPectre 3.0.0-rc1, below its USB setup and connection-help links. This requirement applies to device connections; USB installation and Demo mode remain available without compatible firmware.
+
 Starting Demo or leaving a route cancels pending device discovery; late results cannot replace the active session. The raw CSI parser accepts split or aggregated HTTP chunks while keeping its working buffer bounded.
 
 The shared SSE connection stays open across routes and while the browser is hidden so the device indicator retains live motion. Diagnostics are requested once per second only while the Monitor diagnostics panel is open and the browser document is visible. Wi-Fi scan results are polled after one second, then two seconds, and then every three seconds; leaving Device settings or hiding the document stops polling. Configuration verification reads only the changed resource.

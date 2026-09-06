@@ -33,6 +33,7 @@ enum class CsiLayoutId : uint8_t {
   HT20_57 = 2,
   HT20_64_DOUBLE = 3,
   HT20_57_DOUBLE = 4,
+  LLTF20_53 = 5,
 };
 
 enum class CsiPayloadView : uint8_t {
@@ -107,14 +108,12 @@ inline const char *csi_format_reason_code_to_string(CsiFormatReasonCode code) {
 
 inline bool csi_info_is_legacy_lltf(const wifi_csi_info_t *info,
                                     CsiCaptureProfile profile) {
-#if (defined(CONFIG_IDF_TARGET_ESP32) && CONFIG_IDF_TARGET_ESP32) || \
-    (defined(CONFIG_IDF_TARGET_ESP32S2) && CONFIG_IDF_TARGET_ESP32S2)
+#if CONFIG_SOC_WIFI_HE_SUPPORT
+  return info != nullptr && csi_capture_profile_uses_lltf(profile) &&
+         info->rx_ctrl.cur_bb_format == RX_BB_FORMAT_11G && info->rx_ctrl.second == 0U;
+#else
   return info != nullptr && csi_capture_profile_uses_lltf(profile) &&
          info->rx_ctrl.sig_mode == 0U && info->rx_ctrl.cwb == 0U;
-#else
-  (void)info;
-  (void)profile;
-  return false;
 #endif
 }
 
@@ -145,8 +144,10 @@ inline CsiFormatAssessment assess_ht20_sensing_format(
 #if CONFIG_SOC_WIFI_HE_SUPPORT
         (profile == CsiCaptureProfile::VHT20 &&
          info->rx_ctrl.cur_bb_format == RX_BB_FORMAT_VHT) ||
-        (profile == CsiCaptureProfile::HT20 &&
-         info->rx_ctrl.cur_bb_format == RX_BB_FORMAT_HT);
+        (profile != CsiCaptureProfile::VHT20 &&
+         info->rx_ctrl.cur_bb_format == RX_BB_FORMAT_HT) ||
+        (profile == CsiCaptureProfile::LLTF20 &&
+         info->rx_ctrl.cur_bb_format == RX_BB_FORMAT_11G);
 #else
         (profile == CsiCaptureProfile::HT20 && info->rx_ctrl.sig_mode == 1U) ||
         (profile == CsiCaptureProfile::LLTF20 &&
@@ -163,6 +164,13 @@ inline CsiFormatAssessment assess_ht20_sensing_format(
   assessment.reason_code = CsiFormatReasonCode::NONE;
   assessment.normalized_len = HT20_CSI_LEN;
   assessment.normalized_num_subcarriers = HT20_NUM_SUBCARRIERS;
+
+  if (is_legacy_lltf && assessment.raw_len == LLTF20_CSI_LEN_SHORT) {
+    assessment.layout_id = CsiLayoutId::LLTF20_53;
+    assessment.payload_view = CsiPayloadView::NORMALIZED;
+    assessment.normalization_tag = NormalizedCSIPayloadTag::LLTF53_TO_64;
+    return assessment;
+  }
 
   if (is_legacy_lltf && assessment.raw_len != HT20_CSI_LEN) {
     assessment.disposition = CsiFormatDisposition::DROP;

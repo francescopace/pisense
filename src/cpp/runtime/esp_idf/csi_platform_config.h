@@ -17,7 +17,9 @@
 
 namespace espectre {
 
-constexpr CsiCaptureProfile select_csi_capture_profile(uint8_t wifi_channel) {
+constexpr CsiCaptureProfile select_csi_capture_profile(uint8_t wifi_channel,
+                                                       bool requires_lltf = false) {
+  if (requires_lltf) return CsiCaptureProfile::LLTF20;
 #if (defined(CONFIG_IDF_TARGET_ESP32) && CONFIG_IDF_TARGET_ESP32) || \
     (defined(CONFIG_IDF_TARGET_ESP32S2) && CONFIG_IDF_TARGET_ESP32S2)
   constexpr bool kPrefersLltf20 = true;

@@ -190,6 +190,8 @@ const char *traffic_mode_name(RuntimeTrafficMode mode) {
       return RUNTIME_TRAFFIC_GENERATOR_MODE_DNS_NAME;
     case RuntimeTrafficMode::DNS_TCP:
       return RUNTIME_TRAFFIC_GENERATOR_MODE_DNS_TCP_NAME;
+    case RuntimeTrafficMode::WIFI_RAW:
+      return RUNTIME_TRAFFIC_GENERATOR_MODE_WIFI_RAW_NAME;
     default:
       return RUNTIME_TRAFFIC_GENERATOR_MODE_PING_NAME;
   }
@@ -232,6 +234,9 @@ const char *subcarrier_source_name(RuntimeSubcarrierSource source) {
 }
 
 RuntimeTrafficMode parse_traffic_mode(const char *mode) {
+  if (mode != nullptr && std::strcmp(mode, RUNTIME_TRAFFIC_GENERATOR_MODE_WIFI_RAW_NAME) == 0) {
+    return RuntimeTrafficMode::WIFI_RAW;
+  }
   if (mode != nullptr && std::strcmp(mode, RUNTIME_TRAFFIC_GENERATOR_MODE_DNS_NAME) == 0) {
     return RuntimeTrafficMode::DNS;
   }

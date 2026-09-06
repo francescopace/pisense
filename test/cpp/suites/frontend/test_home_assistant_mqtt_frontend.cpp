@@ -215,7 +215,12 @@ void test_native_frontend_mqtt_connect_publishes_ha_discovery_and_subscribes_bir
                                         publish.retain &&
                                         publish.payload.find("\"name\":\"CSI Traffic Source\"") !=
                                             std::string::npos &&
-                                        publish.payload.find("\"options\":[\"ping\",\"dns\",\"dns_tcp\"]") !=
+                                        publish.payload.find(
+                                            std::string("\"options\":[\"") +
+                                            RUNTIME_TRAFFIC_GENERATOR_MODE_PING_NAME + "\",\"" +
+                                            RUNTIME_TRAFFIC_GENERATOR_MODE_DNS_NAME + "\",\"" +
+                                            RUNTIME_TRAFFIC_GENERATOR_MODE_DNS_TCP_NAME + "\",\"" +
+                                            RUNTIME_TRAFFIC_GENERATOR_MODE_WIFI_RAW_NAME + "\"]") !=
                                             std::string::npos;
                                }));
   const int csi_traffic_discovery = mqtt_publish_index(

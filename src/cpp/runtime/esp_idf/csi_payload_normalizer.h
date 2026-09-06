@@ -20,14 +20,15 @@ enum class NormalizedCSIPayloadTag : uint8_t {
   DOUBLE_HT20,
   HT57_TO_64,
   DOUBLE_HT57_TO_64,
+  LLTF53_TO_64,
 };
 
 struct NormalizedCSIPayload {
   const int8_t *data{nullptr};
   size_t len{0};
   // Describes how the payload length was normalized. Bin ordering is tracked
-  // separately because the two are independent: any length can arrive in either
-  // ordering.
+  // separately for full-width payloads. Named compact layouts have a fixed
+  // input ordering and are normalized directly into centered bins.
   NormalizedCSIPayloadTag tag{NormalizedCSIPayloadTag::NONE};
   // True when the payload arrived in Espressif's classic bin order and was
   // rotated into the centered convention that `DEFAULT_SUBCARRIERS` assumes.

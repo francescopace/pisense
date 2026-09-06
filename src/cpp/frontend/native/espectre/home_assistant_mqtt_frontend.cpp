@@ -358,7 +358,8 @@ void HomeAssistantMqttFrontend::handle_csi_traffic_mode_command_(const std::stri
 void HomeAssistantMqttFrontend::handle_traffic_generator_mode_command_(const std::string &payload) {
   const std::string mode = normalize_text_token(payload);
   if (mode != RUNTIME_TRAFFIC_GENERATOR_MODE_PING_NAME && mode != RUNTIME_TRAFFIC_GENERATOR_MODE_DNS_NAME &&
-      mode != RUNTIME_TRAFFIC_GENERATOR_MODE_DNS_TCP_NAME) {
+      mode != RUNTIME_TRAFFIC_GENERATOR_MODE_DNS_TCP_NAME &&
+      mode != RUNTIME_TRAFFIC_GENERATOR_MODE_WIFI_RAW_NAME) {
     ESP_LOGW(TAG, "Invalid HA traffic generator mode command: %s", payload.c_str());
     return;
   }

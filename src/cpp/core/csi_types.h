@@ -19,6 +19,7 @@ constexpr uint16_t HT20_NUM_SUBCARRIERS = 64U;
 constexpr uint16_t HT20_CSI_LEN = 128U;
 constexpr uint16_t HT20_CSI_LEN_DOUBLE = 256U;
 constexpr uint16_t HT20_CSI_LEN_SHORT = 114U;
+constexpr uint16_t LLTF20_CSI_LEN_SHORT = 106U;
 constexpr uint16_t HT20_CSI_LEN_SHORT_DOUBLE = 228U;
 constexpr uint8_t HT20_CSI_LEN_SHORT_LEFT_PAD = 8U;
 constexpr uint8_t HT20_GUARD_BAND_LOW = 4U;

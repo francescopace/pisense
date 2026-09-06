@@ -2,7 +2,7 @@
  * ESPectre - Traffic Generator Manager Implementation
  *
  * One task owns pacing, socket draining, and local send-error recovery.
- * Protocol backends only describe the socket and encode one packet.
+ * Protocol backends encode and send one socket or raw Wi-Fi packet.
  *
  * Author: Francesco Pace <francesco.pace@gmail.com>
  * SPDX-License-Identifier: GPL-3.0-only
@@ -27,7 +27,10 @@
 
 #include "esp_netif.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "espectre_log.h"
+#include "mac_address_helpers.h"
+#include "sdkconfig.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
 #include "sta_socket_helpers.h"
@@ -76,6 +79,7 @@ class TrafficProtocol {
  public:
   virtual ~TrafficProtocol() = default;
   virtual const char *name() const = 0;
+  virtual bool uses_socket() const { return true; }
   virtual int socket_type() const = 0;
   virtual int socket_protocol() const = 0;
   virtual uint16_t destination_port() const = 0;
@@ -157,10 +161,35 @@ class IcmpTrafficProtocol final : public TrafficProtocol {
   uint16_t sequence_{0U};
 };
 
+class WifiRawTrafficProtocol final : public TrafficProtocol {
+ public:
+  explicit WifiRawTrafficProtocol(const uint8_t *frame) : frame_(frame) {}
+
+  const char *name() const override { return RUNTIME_TRAFFIC_GENERATOR_MODE_WIFI_RAW_NAME; }
+  bool uses_socket() const override { return false; }
+  int socket_type() const override { return 0; }
+  int socket_protocol() const override { return 0; }
+  uint16_t destination_port() const override { return 0U; }
+
+  ssize_t send_packet(int sock, const sockaddr_in &destination) override {
+    (void)sock;
+    (void)destination;
+    const esp_err_t err = esp_wifi_80211_tx(WIFI_IF_STA, frame_, TRAFFIC_NULL_DATA_FRAME_SIZE, true);
+    if (err == ESP_OK) return TRAFFIC_NULL_DATA_FRAME_SIZE;
+    // Preserve the shared pacing and memory-pressure backoff policy.
+    errno = err == ESP_ERR_NO_MEM ? ENOMEM : EIO;
+    return -1;
+  }
+
+ private:
+  const uint8_t *frame_;
+};
+
 TrafficProtocol &select_traffic_protocol(RuntimeTrafficMode mode,
                                          DnsTcpTrafficProtocol &dns_tcp,
                                          DnsUdpTrafficProtocol &dns_udp,
-                                         IcmpTrafficProtocol &ping) {
+                                         IcmpTrafficProtocol &ping,
+                                         WifiRawTrafficProtocol &wifi_raw) {
   switch (mode) {
     case RuntimeTrafficMode::PING:
       return ping;
@@ -168,6 +197,8 @@ TrafficProtocol &select_traffic_protocol(RuntimeTrafficMode mode,
       return dns_udp;
     case RuntimeTrafficMode::DNS_TCP:
       return dns_tcp;
+    case RuntimeTrafficMode::WIFI_RAW:
+      return wifi_raw;
     default:
       return ping;
   }
@@ -181,6 +212,8 @@ const char *generator_traffic_mode_name(RuntimeTrafficMode mode) {
       return "dns";
     case RuntimeTrafficMode::DNS_TCP:
       return "dns_tcp";
+    case RuntimeTrafficMode::WIFI_RAW:
+      return RUNTIME_TRAFFIC_GENERATOR_MODE_WIFI_RAW_NAME;
     default:
       return "ping";
   }
@@ -320,6 +353,21 @@ size_t build_dns_tcp_query_frame(uint16_t transaction_id,
   return TRAFFIC_DNS_TCP_FRAME_SIZE;
 }
 
+size_t build_null_data_frame(const uint8_t *bssid, const uint8_t *station_mac,
+                             uint8_t *buffer, size_t buffer_len) {
+  if (bssid == nullptr || station_mac == nullptr || buffer == nullptr ||
+      buffer_len < TRAFFIC_NULL_DATA_FRAME_SIZE || is_zero_mac_address(bssid) ||
+      is_zero_mac_address(station_mac) || ((bssid[0] | station_mac[0]) & 0x01U) != 0U) return 0U;
+  std::memset(buffer, 0, TRAFFIC_NULL_DATA_FRAME_SIZE);
+  buffer[0] = 0x48U;  // Non-QoS Null Data, protocol version zero.
+  buffer[1] = 0x01U;  // ToDS; keep power management, retry, and fragmentation clear.
+  std::memcpy(buffer + 4U, bssid, 6U);
+  std::memcpy(buffer + 10U, station_mac, 6U);
+  std::memcpy(buffer + 16U, bssid, 6U);
+  // ESP-IDF supplies the sequence number and FCS.
+  return TRAFFIC_NULL_DATA_FRAME_SIZE;
+}
+
 void TrafficGeneratorManager::init(uint32_t target_pps, RuntimeTrafficMode mode) {
   task_handle_ = nullptr;
   sock_ = -1;
@@ -347,20 +395,46 @@ bool TrafficGeneratorManager::start(uint32_t gateway_addr) {
     ESPECTRE_LOGE(TAG, "Previous traffic generator task is still stopping");
     return false;
   }
-  if (target_pps_ == 0U || gateway_addr == 0U) {
-    ESPECTRE_LOGE(TAG, "Gateway IP is unavailable in the connection event");
+  if (target_pps_ == 0U || (mode_ != RuntimeTrafficMode::WIFI_RAW && gateway_addr == 0U)) {
+    ESPECTRE_LOGE(TAG, "Traffic rate or gateway IP is unavailable");
     return false;
   }
   gateway_addr_ = gateway_addr;
 
+  if (mode_ == RuntimeTrafficMode::WIFI_RAW) {
+    wifi_ap_record_t ap{};
+    uint8_t station_mac[6]{};
+    if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK ||
+        esp_wifi_get_mac(WIFI_IF_STA, station_mac) != ESP_OK ||
+        build_null_data_frame(ap.bssid, station_mac, null_data_frame_, sizeof(null_data_frame_)) == 0U) {
+      ESPECTRE_LOGE(TAG, "Associated AP or station MAC is unavailable");
+      return false;
+    }
+    // Raw injection defaults to DSSS on 2.4 GHz; its ACKs cannot supply LLTF CSI.
+#if CONFIG_IDF_TARGET_ESP32C5 || CONFIG_IDF_TARGET_ESP32C6
+    wifi_tx_rate_config_t rate_config{};
+    rate_config.phymode = ap.primary > 14U ? WIFI_PHY_MODE_11A : WIFI_PHY_MODE_11G;
+    rate_config.rate = WIFI_PHY_RATE_6M;
+    const esp_err_t rate_err = esp_wifi_config_80211_tx(WIFI_IF_STA, &rate_config);
+#else
+    // ESP-IDF 5.5.5 accepts the newer API but leaves raw TX at 1 Mbps on ESP32/S2/S3/C3.
+    const esp_err_t rate_err = esp_wifi_config_80211_tx_rate(WIFI_IF_STA, WIFI_PHY_RATE_6M);
+#endif
+    if (rate_err != ESP_OK) {
+      ESPECTRE_LOGE(TAG, "Failed to configure raw OFDM TX rate: %s", esp_err_to_name(rate_err));
+      return false;
+    }
+  }
+
   DnsTcpTrafficProtocol dns_tcp_protocol;
   DnsUdpTrafficProtocol dns_udp_protocol;
   IcmpTrafficProtocol icmp_protocol(icmp_identifier_);
+  WifiRawTrafficProtocol wifi_raw_protocol(null_data_frame_);
   const TrafficProtocol &protocol =
-      select_traffic_protocol(mode_, dns_tcp_protocol, dns_udp_protocol, icmp_protocol);
-  sock_ = create_protocol_socket(protocol);
-  if (sock_ < 0) {
-    return false;
+      select_traffic_protocol(mode_, dns_tcp_protocol, dns_udp_protocol, icmp_protocol, wifi_raw_protocol);
+  if (protocol.uses_socket()) {
+    sock_ = create_protocol_socket(protocol);
+    if (sock_ < 0) return false;
   }
 
   current_rate_pps_.store(target_pps_, std::memory_order_relaxed);
@@ -372,7 +446,7 @@ bool TrafficGeneratorManager::start(uint32_t gateway_addr) {
   if (result != pdPASS) {
     running_.store(false, std::memory_order_relaxed);
     task_exited_.store(true, std::memory_order_relaxed);
-    close(sock_);
+    if (sock_ >= 0) close(sock_);
     sock_ = -1;
     ESPECTRE_LOGE(TAG, "Failed to create traffic generator task (result=%d)", static_cast<int>(result));
     return false;
@@ -454,8 +528,9 @@ void TrafficGeneratorManager::traffic_task_(void *arg) {
   DnsTcpTrafficProtocol dns_tcp_protocol;
   DnsUdpTrafficProtocol dns_udp_protocol;
   IcmpTrafficProtocol icmp_protocol(manager->icmp_identifier_);
+  WifiRawTrafficProtocol wifi_raw_protocol(manager->null_data_frame_);
   TrafficProtocol *protocol =
-      &select_traffic_protocol(manager->mode_, dns_tcp_protocol, dns_udp_protocol, icmp_protocol);
+      &select_traffic_protocol(manager->mode_, dns_tcp_protocol, dns_udp_protocol, icmp_protocol, wifi_raw_protocol);
   sockaddr_in destination{};
   destination.sin_family = AF_INET;
   destination.sin_port = htons(protocol->destination_port());
@@ -516,7 +591,8 @@ void TrafficGeneratorManager::traffic_task_(void *arg) {
       }
     }
 
-    const SocketDrainResult drain_result = drain_socket(manager->sock_);
+    const SocketDrainResult drain_result = protocol->uses_socket()
+                                              ? drain_socket(manager->sock_) : SocketDrainResult::READY;
     if (protocol->connection_oriented() && drain_result != SocketDrainResult::READY) {
       ESPECTRE_LOGW(TAG, "%s TCP connection closed while draining responses", protocol->name());
       (void)recreate_socket();
@@ -540,8 +616,8 @@ void TrafficGeneratorManager::traffic_task_(void *arg) {
       }
       const bool transient_error = current_errno == EAGAIN || current_errno == EWOULDBLOCK ||
                                    current_errno == ENOMEM;
-      if ((protocol->connection_oriented() && !transient_error) ||
-          consecutive_errors >= CONSECUTIVE_ERROR_REOPEN_THRESHOLD) {
+      if (protocol->uses_socket() && ((protocol->connection_oriented() && !transient_error) ||
+          consecutive_errors >= CONSECUTIVE_ERROR_REOPEN_THRESHOLD)) {
         (void)recreate_socket();
         consecutive_errors = 0U;
         if (manager->sock_ < 0) {

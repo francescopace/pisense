@@ -102,6 +102,12 @@ choice ESPECTRE_TRAFFIC_GENERATOR_MODE
 
     config ESPECTRE_TRAFFIC_GENERATOR_MODE_DNS_TCP
         bool "DNS over TCP"
+
+    config ESPECTRE_TRAFFIC_GENERATOR_MODE_WIFI_RAW
+        bool "Wi-Fi raw (Null Data to AP)"
+        help
+            Send non-QoS Null Data frames directly to the associated AP BSSID.
+            Selects LLTF20 capture for ACKs and leaves the TX rate to the driver.
 endchoice
 
 config ESPECTRE_EVALUATION_INTERVAL_MS

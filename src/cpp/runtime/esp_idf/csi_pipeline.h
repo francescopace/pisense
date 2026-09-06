@@ -163,6 +163,9 @@ class CsiPipeline {
    */
   esp_err_t disable();
 
+  /** Change the active capture profile, clearing samples and retaining callbacks. */
+  esp_err_t reconfigure_capture(CsiCaptureProfile profile);
+
   CsiCaptureProfile capture_profile() const {
     return capture_service_.capture_profile();
   }

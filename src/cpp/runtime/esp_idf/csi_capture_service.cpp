@@ -77,7 +77,7 @@ void CsiCaptureService::loop() {
     ESPECTRE_LOGI(TAG, "CSI double-length collapse active: 256->128 and/or 228->114");
   }
   if (remap_log_event_.take()) {
-    ESPECTRE_LOGI(TAG, "CSI remap active: 57->64 SC (left_pad=4, right_pad=3)");
+    ESPECTRE_LOGI(TAG, "CSI compact payload remap active: 53/57->64 SC");
   }
   uint8_t previous_channel = 0U;
   uint8_t current_channel = 0U;
@@ -99,6 +99,10 @@ esp_err_t CsiCaptureService::enable(CsiCaptureProfile profile) {
   }
 
   capture_profile_ = profile;
+  bin_layout_ = Ht20BinLayout::UNKNOWN;
+  consecutive_format_drops_ = 0U;
+  has_accepted_packet_ = false;
+  last_accepted_normalization_tag_ = NormalizedCSIPayloadTag::NONE;
   const uint32_t attempt = enable_attempts_.fetch_add(1U, std::memory_order_relaxed) + 1U;
   ESPECTRE_LOGI(TAG, "Arming CSI attempt=%" PRIu32 " profile=%s", attempt,
                csi_capture_profile_name(capture_profile_));
@@ -266,14 +270,15 @@ void CsiCaptureService::process_packet(wifi_csi_info_t *data) {
   // packet with a fully faded guard-adjacent tone cannot leave one frame
   // unrotated in an otherwise rotated stream.
   if (normalized.valid() && normalized.len == HT20_CSI_LEN) {
-    if (bin_layout_ == Ht20BinLayout::UNKNOWN) {
+    const bool compact_lltf = normalized.tag == NormalizedCSIPayloadTag::LLTF53_TO_64;
+    if (!compact_lltf && bin_layout_ == Ht20BinLayout::UNKNOWN) {
       const Ht20BinLayout detected =
           detect_ht20_bin_layout(normalized.data, normalized.len);
       if (detected != Ht20BinLayout::UNKNOWN) {
         bin_layout_ = detected;
       }
     }
-    if (bin_layout_ == Ht20BinLayout::CLASSIC) {
+    if (!compact_lltf && bin_layout_ == Ht20BinLayout::CLASSIC) {
       rotate_ht20_classic_to_centered(normalized.data, rotation_scratch_.data());
       normalized.data = rotation_scratch_.data();
       normalized.rotated_to_centered = true;
@@ -301,7 +306,8 @@ void CsiCaptureService::process_packet(wifi_csi_info_t *data) {
     }
   }
 
-  if (normalized.tag == NormalizedCSIPayloadTag::HT57_TO_64 ||
+  if (normalized.tag == NormalizedCSIPayloadTag::LLTF53_TO_64 ||
+      normalized.tag == NormalizedCSIPayloadTag::HT57_TO_64 ||
       normalized.tag == NormalizedCSIPayloadTag::DOUBLE_HT57_TO_64) {
     normalization_remap_packets_.fetch_add(1U, std::memory_order_relaxed);
     if (!remap_seen_.exchange(true, std::memory_order_relaxed)) {

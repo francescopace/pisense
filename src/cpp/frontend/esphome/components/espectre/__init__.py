@@ -232,7 +232,7 @@ CONFIG_SCHEMA = cv.Schema({
     
     # Traffic generator mode: ping (default), DNS over UDP, or DNS over TCP.
     cv.Optional(CONF_TRAFFIC_GENERATOR_MODE, default=TRAFFIC_GENERATOR_MODE_DEFAULT): cv.one_of(
-        "ping", "dns", "dns_tcp", lower=True
+        "ping", "dns", "dns_tcp", "wifi_raw", lower=True
     ),
     
     # Detection profile: Lightweight (default) or High Accuracy.
@@ -634,7 +634,7 @@ async def to_code(config):
 
     traffic_generator_mode = await select.new_select(
         config[CONF_TRAFFIC_GENERATOR_MODE_SELECT],
-        options=["ping", "dns", "dns_tcp"],
+        options=["ping", "dns", "dns_tcp", "wifi_raw"],
     )
     cg.add(traffic_generator_mode.set_parent(var))
     cg.add(traffic_generator_mode.set_csi_traffic_mode(False))

@@ -1,9 +1,9 @@
 /*
  * ESPectre - Traffic Generator Manager
  *
- * Generates paced Wi-Fi traffic to the gateway at the configured CSI target.
- * Scheduling, local send backoff, and stall logging are shared by the DNS and
- * ICMP protocol backends. Occupancy never changes the send rate.
+ * Generates paced traffic to the gateway or associated AP at the configured
+ * CSI target. Scheduling, local send backoff, and stall logging are shared by
+ * all backends. Occupancy never changes the send rate.
  *
  * Author: Francesco Pace <francesco.pace@gmail.com>
  * SPDX-License-Identifier: GPL-3.0-only
@@ -58,6 +58,10 @@ inline int64_t next_traffic_send_deadline_us(int64_t previous_deadline_us,
 
 constexpr size_t TRAFFIC_DNS_QUERY_PAYLOAD_SIZE = 17U;
 constexpr size_t TRAFFIC_DNS_TCP_FRAME_SIZE = TRAFFIC_DNS_QUERY_PAYLOAD_SIZE + 2U;
+constexpr size_t TRAFFIC_NULL_DATA_FRAME_SIZE = 24U;
+
+size_t build_null_data_frame(const uint8_t *bssid, const uint8_t *station_mac,
+                             uint8_t *buffer, size_t buffer_len);
 
 size_t build_dns_query_payload(uint16_t transaction_id,
                                uint8_t *buffer,
@@ -99,6 +103,7 @@ class TrafficGeneratorManager : public ICsiTrafficGenerator {
   uint32_t target_pps_{0U};
   RuntimeTrafficMode mode_{RuntimeTrafficMode::PING};
   uint16_t icmp_identifier_{0U};
+  uint8_t null_data_frame_[TRAFFIC_NULL_DATA_FRAME_SIZE]{};
   std::atomic<uint32_t> current_rate_pps_{0U};
   std::atomic<bool> running_{false};
   std::atomic<bool> paused_{false};

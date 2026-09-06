@@ -387,7 +387,9 @@ bool EspIdfRuntime::set_csi_traffic_mode_runtime(CsiTrafficMode mode) {
     restore_traffic_runtime_config_(previous_config);
     return false;
   }
-  (void) trigger_recalibration();
+  if (config_.detection_algorithm == DetectionAlgorithm::LIGHTWEIGHT) {
+    (void) trigger_recalibration();
+  }
   ESPECTRE_LOGI(RUNTIME_TAG, "CSI traffic mode updated to %s", csi_traffic_mode_name(mode));
   return true;
 }
@@ -416,7 +418,7 @@ bool EspIdfRuntime::set_traffic_generator_mode_runtime(RuntimeTrafficMode mode) 
     restore_traffic_runtime_config_(previous_config);
     return false;
   }
-  if (generator_active) {
+  if (generator_active && config_.detection_algorithm == DetectionAlgorithm::LIGHTWEIGHT) {
     (void) trigger_recalibration();
   }
   ESPECTRE_LOGI(RUNTIME_TAG, "Traffic generator mode updated to %s", traffic_mode_name(mode));
@@ -516,7 +518,7 @@ bool EspIdfRuntime::start_raw_collection(raw_csi_packet_callback_t callback, voi
   refresh_csi_local_identity_(wifi_ip_info_.ip.addr);
 
   if (!csi_pipeline_.is_enabled()) {
-    const CsiCaptureProfile profile = select_csi_capture_profile(wifi_channel_);
+    const CsiCaptureProfile profile = sensing_capture_profile_();
     snapshot_.csi_capture_profile = profile;
     const esp_err_t err = csi_pipeline_.enable({}, profile);
     if (err != ESP_OK) {
@@ -564,6 +566,12 @@ bool EspIdfRuntime::stop_raw_collection(RawCsiStopReason reason) {
   return true;
 }
 
+CsiCaptureProfile EspIdfRuntime::sensing_capture_profile_() const {
+  const bool requires_lltf = config_.csi_traffic_mode == CsiTrafficMode::INTERNAL &&
+                             config_.traffic_generator_mode == RuntimeTrafficMode::WIFI_RAW;
+  return select_csi_capture_profile(wifi_channel_, requires_lltf);
+}
+
 bool EspIdfRuntime::apply_traffic_runtime_config_(bool restart_service, bool recalibrate_if_active) {
   if (restart_service) {
     csi_traffic_service_.stop();
@@ -572,12 +580,25 @@ bool EspIdfRuntime::apply_traffic_runtime_config_(bool restart_service, bool rec
   if (!setup_complete_ || !wifi_ready_ || !services_armed_ || wifi_ip_info_.ip.addr == 0U || !csi_pipeline_.is_enabled()) {
     return true;
   }
+  const CsiCaptureProfile profile = sensing_capture_profile_();
+  if (profile != csi_pipeline_.capture_profile()) {
+    cancel_calibration_(true);
+    const esp_err_t err = csi_pipeline_.reconfigure_capture(profile);
+    if (err != ESP_OK) {
+      notify_fault_("Failed to change CSI capture profile");
+      return false;
+    }
+    snapshot_.csi_capture_profile = profile;
+    snapshot_.motion_state = MotionState::IDLE;
+    snapshot_.movement_metric = 0.0f;
+    vTaskDelay(pdMS_TO_TICKS(CSI_ENABLE_SETTLE_MS));
+  }
   refresh_csi_local_identity_(wifi_ip_info_.ip.addr);
   if (!csi_traffic_service_.start(wifi_ip_info_.gw.addr)) {
     notify_fault_("Failed to start CSI traffic service");
     return false;
   }
-  if (recalibrate_if_active) {
+  if (recalibrate_if_active && config_.detection_algorithm == DetectionAlgorithm::LIGHTWEIGHT) {
     (void) trigger_recalibration();
   }
   return true;
@@ -585,7 +606,7 @@ bool EspIdfRuntime::apply_traffic_runtime_config_(bool restart_service, bool rec
 
 void EspIdfRuntime::restore_traffic_runtime_config_(const RuntimeConfig &previous_config) {
   config_ = previous_config;
-  if (!apply_traffic_runtime_config_(true, false)) {
+  if (!apply_traffic_runtime_config_(true, true)) {
     notify_fault_("Failed to restore CSI traffic configuration");
   }
 }
@@ -782,7 +803,7 @@ void EspIdfRuntime::start_sensing_services_(const esp_netif_ip_info_t &ip_info) 
       return;
     }
 
-    const CsiCaptureProfile profile = select_csi_capture_profile(wifi_channel_);
+    const CsiCaptureProfile profile = sensing_capture_profile_();
     snapshot_.csi_capture_profile = profile;
     const esp_err_t err = csi_pipeline_.enable([this](MotionState state, uint32_t packets_received) {
       snapshot_.motion_state = state;
