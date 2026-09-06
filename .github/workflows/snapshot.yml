@@ -186,7 +186,7 @@ jobs:
         run: |
           python .github/scripts/build_firmware_manifest.py \
             --firmware-dir firmware \
-            --output firmware/firmware-manifest-${{ steps.snapshot.outputs.tag }}.json \
+            --output firmware/firmware-manifest-${{ steps.snapshot.outputs.channel }}.json \
             --channel "${{ steps.snapshot.outputs.channel }}" \
             --version "${{ steps.snapshot.outputs.version }}" \
             --release-tag "${{ steps.snapshot.outputs.tag }}" \
@@ -285,10 +285,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Remove superseded unbundled compliance assets
+      - name: Remove superseded manifests and unbundled compliance assets
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           SNAPSHOT_TAG: ${{ steps.snapshot.outputs.tag }}
+          SNAPSHOT_CHANNEL: ${{ steps.snapshot.outputs.channel }}
         with:
           script: |
             const release = await github.rest.repos.getReleaseByTag({
@@ -303,6 +304,12 @@ jobs:
               per_page: 100
             });
             const legacyNames = new Set(['LICENSE', 'LICENSING.md', 'THIRD_PARTY_NOTICES.md']);
+            const uploadedNames = new Set(assets.map(asset => asset.name));
+            for (const kind of ['firmware', 'sdk']) {
+              if (uploadedNames.has(`${kind}-manifest-${process.env.SNAPSHOT_CHANNEL}.json`)) {
+                legacyNames.add(`${kind}-manifest-${process.env.SNAPSHOT_TAG}.json`);
+              }
+            }
             const legacySuffixes = [
               '-sbom.spdx.json',
               '-THIRD_PARTY_NOTICES.txt',

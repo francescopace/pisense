@@ -319,6 +319,8 @@ ESPectre publishes source-first SDK bundles alongside the firmware release chann
 | `preview` | rolling `snapshot` GitHub prerelease and `https://espectre.dev/artifacts/sdk/preview/` | Validate `main` before the next release |
 | `develop` | rolling `snapshot-dev` GitHub prerelease and `https://espectre.dev/artifacts/sdk/develop/` | Pre-main validation from `develop` |
 
+Rolling releases publish `sdk-manifest-preview.json` and `sdk-manifest-develop.json`; the manifest filename follows the channel, while `release_tag` retains the GitHub tag shown above. Tagged releases publish `sdk-manifest-<release-tag>.json`.
+
 Each SDK bundle includes:
 
 - `docs/SDK.md`

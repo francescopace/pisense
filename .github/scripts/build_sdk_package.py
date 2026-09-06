@@ -537,7 +537,8 @@ def build_sdk_package(args: argparse.Namespace) -> dict:
     bundle_root = asset_stem
     tarball_name = f"{asset_stem}.tar.gz"
     zip_name = f"{asset_stem}.zip"
-    manifest_name = f"sdk-manifest-{args.release_tag}.json"
+    manifest_suffix = args.release_tag if args.channel == "release" else args.channel
+    manifest_name = f"sdk-manifest-{manifest_suffix}.json"
     source_date_epoch = resolve_source_date_epoch(getattr(args, "source_date_epoch", None))
     generated_at = datetime.fromtimestamp(source_date_epoch, timezone.utc).isoformat()
     tarball_path = output_dir / tarball_name

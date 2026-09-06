@@ -194,7 +194,9 @@ def test_snapshot_publishes_stable_coverage_badge_endpoints() -> None:
     assert "Recheck source commit before publishing coverage" in publisher
 
 
-def test_coverage_badge_builder_reads_each_report_format(tmp_path: Path) -> None:
+def test_coverage_badge_builder_reads_each_report_format(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     builder = load_script("build_coverage_badges")
     python_report = tmp_path / "python.json"
     cpp_report = tmp_path / "cpp.json"
@@ -258,6 +260,11 @@ def test_coverage_badge_builder_reads_each_report_format(tmp_path: Path) -> None
         "web", web_report, WEB_COVERAGE_THRESHOLDS
     ) == expected_web_badge
 
+    summary_path = tmp_path / "github-step-summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
+    cli_environment = os.environ.copy()
+    cli_environment.pop("GITHUB_STEP_SUMMARY", None)
+
     output = tmp_path / "coverage-python.json"
     result = subprocess.run(
         [
@@ -275,10 +282,12 @@ def test_coverage_badge_builder_reads_each_report_format(tmp_path: Path) -> None
         cwd=REPO_ROOT,
         check=False,
         capture_output=True,
+        env=cli_environment,
         text=True,
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(output.read_text(encoding="utf-8")) == expected_python_badge
+    assert not summary_path.exists()
 
     python_report.write_text(
         python_report.read_text(encoding="utf-8").replace(
@@ -664,29 +673,35 @@ def test_detect_git_version_ignores_rolling_tags(monkeypatch: pytest.MonkeyPatch
         detector.parse_version_core("preview")
 
 
-def test_sdk_snapshot_stamps_git_describe_identity(tmp_path: Path) -> None:
+@pytest.mark.parametrize("channel", ["preview", "develop"])
+def test_sdk_snapshot_stamps_git_describe_identity(tmp_path: Path, channel: str) -> None:
     builder = load_script("build_sdk_package")
-    _, develop_tag = _ota_release_tags()
+    preview_tag, develop_tag = _ota_release_tags()
+    release_tag = preview_tag if channel == "preview" else develop_tag
     args = argparse.Namespace(
-        channel="develop",
+        channel=channel,
         version="2.8.0-237-g7439944",
-        release_tag=develop_tag,
+        release_tag=release_tag,
         output_dir=str(tmp_path),
         commit="7439944d441e9a8e485a1d610d99265d743e93f8",
         source_date_epoch=1_800_000_000,
         url_prefix=None,
     )
     manifest = builder.build_sdk_package(args)
+    manifest_path = tmp_path / f"sdk-manifest-{channel}.json"
+    assert json.loads(manifest_path.read_text(encoding="utf-8")) == manifest
+    assert load_script("detect_git_version").version_from_sdk_dir(tmp_path) == args.version
+    assert load_script("stage_web_sdk").load_sdk_manifest(tmp_path) == manifest
     assert manifest["schema_version"] == 2
     assert manifest["version"] == "2.8.0-237-g7439944"
     assert "package_version" not in manifest
     assert "sdk_version" not in manifest
-    assert manifest["release_tag"] == develop_tag
+    assert manifest["release_tag"] == release_tag
     assert manifest["supported_esp_idf"] == builder.SDK_SUPPORTED_ESP_IDF
-    assert manifest["artifacts"][0]["filename"] == "espectre-sdk-develop.tar.gz"
-    assert f"/releases/download/{develop_tag}/" in manifest["artifacts"][0]["url"]
+    assert manifest["artifacts"][0]["filename"] == f"espectre-sdk-{channel}.tar.gz"
+    assert f"/releases/download/{release_tag}/" in manifest["artifacts"][0]["url"]
 
-    zip_path = tmp_path / "espectre-sdk-develop.zip"
+    zip_path = tmp_path / f"espectre-sdk-{channel}.zip"
     with zipfile.ZipFile(zip_path) as archive:
         header_name = next(name for name in archive.namelist() if name.endswith("/src/cpp/runtime/espectre_sdk_version.h"))
         header = archive.read(header_name).decode("utf-8")

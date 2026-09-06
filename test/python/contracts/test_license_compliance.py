@@ -170,7 +170,12 @@ def test_repository_license_policy_covers_first_party_code_and_release_artifacts
         assert re.search(r"(?m)^\s+firmware/firmware-compliance-\*\.zip$", workflow)
         assert not re.search(r"(?m)^\s+firmware/\*$", workflow)
         assert "build_firmware_compliance_bundle.py" in workflow
-        assert "Remove superseded unbundled compliance assets" in workflow
+        assert "unbundled compliance assets" in workflow
+        assert "['LICENSE', 'LICENSING.md', 'THIRD_PARTY_NOTICES.md']" in workflow
+        assert "-sbom.spdx.json" in workflow
+        assert "-THIRD_PARTY_NOTICES.txt" in workflow
+        assert "-third-party-licenses.zip" in workflow
+        assert "deleteReleaseAsset" in workflow
         assert "--compliance-url-prefix" in workflow
     assert "--pattern 'firmware-compliance-*.zip'" in published_channel_action
     assert "build_firmware_compliance" in ci_workflow
