@@ -195,6 +195,85 @@ void test_setup_registers_http_post_sse_raw_and_preflight() {
   TEST_ASSERT_EQUAL(1, g_httpd_mock.stop_calls);
 }
 
+void test_setup_failure_releases_server_and_allows_retry() {
+  httpd_mock_reset();
+  EspIdfDirectHttpService service;
+  const auto handler = [](const DirectRequest &) { return std::string("{}"); };
+  g_httpd_mock.start_result = ESP_FAIL;
+  TEST_ASSERT_FALSE(service.setup(config(), handler, {}));
+  TEST_ASSERT_FALSE(service.running());
+  TEST_ASSERT_EQUAL(0, g_httpd_mock.stop_calls);
+  g_httpd_mock.start_result = ESP_OK;
+  g_httpd_mock.register_result = ESP_FAIL;
+  TEST_ASSERT_FALSE(service.setup(config(), handler, {}));
+  TEST_ASSERT_FALSE(service.running());
+  TEST_ASSERT_EQUAL(1, g_httpd_mock.stop_calls);
+  g_httpd_mock.register_result = ESP_OK;
+  TEST_ASSERT_TRUE(service.setup(config(), handler, {}));
+  TEST_ASSERT_TRUE(service.running());
+  service.shutdown();
+  TEST_ASSERT_EQUAL(2, g_httpd_mock.stop_calls);
+}
+
+void test_empty_and_oversized_application_responses_return_bounded_command_errors() {
+  for (size_t size : {size_t{0}, ESPECTRE_DIRECT_MAX_RESPONSE_SIZE + 1U}) {
+    httpd_mock_reset();
+    EspIdfDirectHttpService service;
+    TEST_ASSERT_TRUE(service.setup(config(), [size](const DirectRequest &) {
+      return std::string(size, 'x');
+    }, {}));
+    prepare_json("{\"enabled\":true}");
+    httpd_req_t request = request_for(0U);
+    TEST_ASSERT_EQUAL(ESP_OK, dispatch_request(&request));
+    service.loop();
+    const std::string payload = sent_payload(g_httpd_mock.send_calls - 1);
+    TEST_ASSERT_TRUE(payload.size() <= ESPECTRE_DIRECT_MAX_RESPONSE_SIZE);
+    TEST_ASSERT_TRUE(payload.find("\"accepted\":false") != std::string::npos);
+    TEST_ASSERT_TRUE(payload.find("\"code\":\"internal_error\"") != std::string::npos);
+    TEST_ASSERT_EQUAL(1, g_httpd_mock.async_complete_calls);
+    service.shutdown();
+  }
+}
+
+void test_incomplete_request_never_reaches_application_handler() {
+  httpd_mock_reset();
+  EspIdfDirectHttpService service;
+  int requests = 0;
+  TEST_ASSERT_TRUE(service.setup(config(), [&](const DirectRequest &) {
+    requests++;
+    return std::string("{}");
+  }, {}));
+  prepare_json("{\"enabled\":true}");
+  g_httpd_mock.receive_result = ESP_FAIL;
+  httpd_req_t request = request_for(0U);
+  TEST_ASSERT_EQUAL(ESP_FAIL, dispatch_request(&request));
+  TEST_ASSERT_EQUAL_STRING(HTTPD_400_BAD_REQUEST, g_httpd_mock.response_status);
+  service.loop();
+  TEST_ASSERT_EQUAL(0, requests);
+  TEST_ASSERT_EQUAL(0, g_httpd_mock.async_begin_calls);
+  service.shutdown();
+}
+
+void test_sse_initial_send_failure_releases_the_client_slot() {
+  httpd_mock_reset();
+  EspIdfDirectHttpService service;
+  auto limited = config();
+  limited.max_event_clients = 1U;
+  TEST_ASSERT_TRUE(service.setup(limited, [](const DirectRequest &) { return std::string("{}"); }, {}));
+  prepare_json("");
+  g_httpd_mock.send_result = ESP_FAIL;
+  httpd_req_t failed = request_for(1U);
+  TEST_ASSERT_EQUAL(ESP_FAIL, dispatch_request(&failed));
+  TEST_ASSERT_EQUAL(1U, service.diagnostics().send_failures);
+  TEST_ASSERT_EQUAL(1U, service.diagnostics().rejected_connections);
+  TEST_ASSERT_EQUAL(1, g_httpd_mock.async_complete_calls);
+  g_httpd_mock.send_result = ESP_OK;
+  httpd_req_t retry = request_for(1U);
+  TEST_ASSERT_EQUAL(ESP_OK, dispatch_request(&retry));
+  TEST_ASSERT_EQUAL(1U, service.diagnostics().accepted_connections);
+  service.shutdown();
+}
+
 void test_destructor_does_not_dispatch_application_callbacks() {
   httpd_mock_reset();
   size_t client_count_callbacks = 0U;
@@ -446,6 +525,52 @@ void test_sse_limits_clients_frames_events_coalesces_and_heartbeats() {
   TEST_ASSERT_EQUAL(ESP_FAIL, dispatch_request(&extra));
   TEST_ASSERT_EQUAL_STRING(HTTPD_503_SERVICE_UNAVAILABLE, g_httpd_mock.response_status);
   TEST_ASSERT_EQUAL(1U, service.diagnostics().rejected_connections);
+}
+
+void test_sse_queue_preserves_control_events_when_telemetry_fills_capacity() {
+  httpd_mock_reset();
+  EspIdfDirectHttpService service;
+  TEST_ASSERT_TRUE(service.setup(config(), [](const auto &) { return std::string("{}"); }, {}));
+  prepare_json("");
+  httpd_req_t request = request_for(1U);
+  TEST_ASSERT_EQUAL(ESP_OK, dispatch_request(&request));
+  TEST_ASSERT_FALSE(service.publish_event("", "{}", false));
+  TEST_ASSERT_FALSE(service.publish_event("health", "[]", false));
+  TEST_ASSERT_TRUE(service.publish_event("telemetry", "{\"movement\":0.1}", true));
+  TEST_ASSERT_TRUE(service.publish_event("health", "{\"ready\":true}", false));
+  TEST_ASSERT_TRUE(service.publish_event("sensing", "{\"enabled\":false}", false));
+  TEST_ASSERT_EQUAL(1U, service.diagnostics().dropped_motion_events);
+  TEST_ASSERT_FALSE(service.publish_event("telemetry", "{\"movement\":0.2}", true));
+  TEST_ASSERT_EQUAL(2U, service.diagnostics().dropped_motion_events);
+  TEST_ASSERT_FALSE(service.publish_event("device", "{}", false));
+  service.loop();
+  service.loop();
+  TEST_ASSERT_EQUAL(3, g_httpd_mock.send_calls);
+  TEST_ASSERT_TRUE(sent_payload(1).find("event: health") != std::string::npos);
+  TEST_ASSERT_TRUE(sent_payload(2).find("event: sensing") != std::string::npos);
+  service.shutdown();
+}
+
+void test_raw_open_rejection_releases_request_and_permits_retry() {
+  httpd_mock_reset();
+  EspIdfDirectHttpService service;
+  TEST_ASSERT_TRUE(service.setup(config(), [](const auto &) { return std::string("{}"); }, {}));
+  for (bool has_callback : {false, true}) {
+    if (has_callback) {
+      service.set_raw_session_requested_callback([](std::string *message) {
+        *message = "runtime busy";
+        return false;
+      });
+    }
+    prepare_json("");
+    httpd_req_t request = request_for(2U);
+    TEST_ASSERT_EQUAL(has_callback ? ESP_OK : ESP_FAIL, dispatch_request(&request));
+    service.loop();
+    TEST_ASSERT_EQUAL_STRING("409 Conflict", g_httpd_mock.response_status);
+    TEST_ASSERT_FALSE(service.raw_diagnostics().active);
+  }
+  TEST_ASSERT_EQUAL(1, g_httpd_mock.async_complete_calls);
+  service.shutdown();
 }
 
 void test_sse_peer_close_is_not_a_send_failure() {
@@ -838,6 +963,10 @@ int main() {
   RUN_TEST(test_idle_loop_does_not_allocate);
   RUN_TEST(test_raw_storage_failure_and_repeated_sessions_preserve_capacity);
   RUN_TEST(test_setup_registers_http_post_sse_raw_and_preflight);
+  RUN_TEST(test_setup_failure_releases_server_and_allows_retry);
+  RUN_TEST(test_empty_and_oversized_application_responses_return_bounded_command_errors);
+  RUN_TEST(test_incomplete_request_never_reaches_application_handler);
+  RUN_TEST(test_sse_initial_send_failure_releases_the_client_slot);
   RUN_TEST(test_destructor_does_not_dispatch_application_callbacks);
   RUN_TEST(test_shutdown_releases_the_client_count_callback_before_reuse);
   RUN_TEST(test_post_does_not_enqueue_after_shutdown_starts);
@@ -848,6 +977,8 @@ int main() {
   RUN_TEST(test_post_limits_total_request_rate_before_parsing);
   RUN_TEST(test_sse_limits_clients_frames_events_coalesces_and_heartbeats);
   RUN_TEST(test_sse_peer_close_is_not_a_send_failure);
+  RUN_TEST(test_sse_queue_preserves_control_events_when_telemetry_fills_capacity);
+  RUN_TEST(test_raw_open_rejection_releases_request_and_permits_retry);
   RUN_TEST(test_sse_retries_backpressure_before_disconnect);
   RUN_TEST(test_deferred_post_completes_only_once);
   RUN_TEST(test_response_completion_runs_after_send_and_reports_delivery);

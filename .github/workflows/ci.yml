@@ -134,10 +134,7 @@ jobs:
             npz-cache-v2-${{ runner.os }}-
 
       - name: Run Product and Performance Tests with Coverage
-        run: |
-          mkdir -p .cache/reports/coverage
-          pytest test/python -n auto --dist worksteal -v --cov=src/python/micro_espectre --cov=src/python/espectre_cli --cov-branch --cov-report=json:.cache/reports/coverage/python-coverage.json --cov-report=term-missing
-          python test/python/check_coverage.py .cache/reports/coverage/python-coverage.json
+        run: ./test/python/run_coverage.sh
         env:
           PYTEST_XDIST_AUTO_NUM_WORKERS: '4'
 

@@ -82,7 +82,7 @@ def test_cpp_dataset_and_coverage_contracts_are_complete() -> None:
             "runtime": {
                 "branches": 50.0,
                 "functions": 85.0,
-                "lines": 80.0,
+                "lines": 85.0,
             }
         },
         "version": 1,

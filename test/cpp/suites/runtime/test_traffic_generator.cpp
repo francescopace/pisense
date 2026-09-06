@@ -204,8 +204,30 @@ void test_dns_tcp_query_frame_rejects_small_buffer(void) {
 // ENTRY POINT
 // ============================================================================
 
+void test_traffic_generator_rejects_missing_gateway_or_rate_and_resets_pause(void) {
+    TrafficGeneratorManager manager;
+    for (RuntimeTrafficMode mode : {RuntimeTrafficMode::PING, RuntimeTrafficMode::DNS, RuntimeTrafficMode::DNS_TCP}) {
+        manager.init(0U, mode);
+        TEST_ASSERT_FALSE(manager.start(0x0101A8C0U));
+        manager.init(100U, mode);
+        TEST_ASSERT_FALSE(manager.start(0U));
+        TEST_ASSERT_FALSE(manager.is_running());
+        TEST_ASSERT_EQUAL(100U, manager.target_rate_pps());
+        TEST_ASSERT_EQUAL(manager.target_rate_pps(), manager.current_rate_pps());
+        manager.pause();
+        TEST_ASSERT_TRUE(manager.is_paused());
+        manager.loop();
+        manager.resume();
+        TEST_ASSERT_FALSE(manager.is_paused());
+        manager.stop();
+        TEST_ASSERT_EQUAL(0U, manager.send_success_count());
+        TEST_ASSERT_EQUAL(0U, manager.send_error_count());
+    }
+}
+
 int process(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_traffic_generator_rejects_missing_gateway_or_rate_and_resets_pause);
     
     // SendErrorState tests
     RUN_TEST(test_send_error_state_initialization);

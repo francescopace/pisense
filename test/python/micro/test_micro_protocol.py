@@ -10,7 +10,9 @@ import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
 import protocol
+from src.python.micro_espectre import runtime_diagnostics as diagnostics
 from console_output import format_detection_publish_line, print_log
 from src.python.micro_espectre.runtime_diagnostics import (
     advance_periodic_anchor,
@@ -18,6 +20,119 @@ from src.python.micro_espectre.runtime_diagnostics import (
     wifi_csi_available,
 )
 from tools.lib.repo_paths import repo_root
+
+
+def test_runtime_diagnostic_rates_reuse_output_and_handle_counter_reset():
+    sampler = diagnostics.RuntimeDiagnosticsSampler()
+    output = {}
+
+    def snapshot(total, window_slots=100):
+        return diagnostics.collect_runtime_diagnostics_snapshot(
+            traffic_generator=SimpleNamespace(get_packet_count=lambda: total),
+            callback_total=total, accepted_total=total, admitted_total=total,
+            filtered_total=total, missing_slots_total=total, excess_total=total,
+            stale_total=total, out_of_order_total=total, occupancy_slots=75,
+            window_slots=window_slots, wifi_channel=6, rssi_dbm=-57,
+        )
+
+    assert sampler.sample(snapshot(10), 1000, out=output) is output
+    rates = [key for key in diagnostics.STATS_DIAGNOSTIC_KEYS if key.endswith("_pps")]
+    assert all(output[key] == 0 for key in rates)
+    assert output["wifi_channel"] == 6
+    assert output["wifi_rssi_dbm"] == -57
+    for now in [1000, 999]:
+        sampler.sample(snapshot(20), now, out=output)
+        assert all(output[key] == 0 for key in rates)
+    sampler.sample(snapshot(30), 1500, out=output)
+    assert all(output[key] == 40 for key in rates)
+    assert output["csi_occupancy"] == 0.75
+    sampler.sample(snapshot(5, window_slots=0), 2000, out=output)
+    assert all(output[key] == 10 for key in rates)
+    assert output["csi_occupancy"] == 0
+
+
+@pytest.mark.parametrize("generator", [
+    None, SimpleNamespace(), SimpleNamespace(get_packet_count=lambda: "invalid"),
+])
+def test_runtime_diagnostic_snapshot_handles_missing_traffic_counter(generator):
+    output = {}
+    result = diagnostics.collect_runtime_diagnostics_snapshot(traffic_generator=generator, out=output)
+    assert result is output
+    assert result["traffic_packets_total"] == 0
+
+
+@pytest.mark.parametrize("reader,method,unavailable", [
+    (diagnostics.wifi_rssi_dbm, "status", None),
+    (diagnostics.wifi_csi_dropped, "csi_dropped", 0),
+    (diagnostics.wifi_csi_callbacks, "csi_callbacks", None),
+    (diagnostics.wifi_csi_available, "csi_available", 0),
+])
+def test_runtime_wifi_diagnostics_tolerate_older_or_unavailable_drivers(reader, method, unavailable):
+    assert reader(None) == unavailable
+    assert reader(SimpleNamespace()) == unavailable
+    for value in [None, "invalid"]:
+        assert reader(SimpleNamespace(**{method: lambda *_args: value})) == unavailable
+
+    def failed(*_args):
+        raise OSError("driver unavailable")
+
+    assert reader(SimpleNamespace(**{method: failed})) == unavailable
+    value = -60 if method == "status" else 12
+    assert reader(SimpleNamespace(**{method: lambda *_args: value})) == value
+    if method != "status":
+        assert reader(SimpleNamespace(**{method: lambda: -1})) == 0
+    else:
+        assert reader(SimpleNamespace(isconnected=lambda: False, status=lambda *_args: -60)) is None
+
+
+def test_runtime_performance_windows_preserve_heap_minimum_and_clear_samples():
+    performance = diagnostics.RuntimePerformanceDiagnostics()
+    window = performance.WINDOW_INTERVAL_MS
+    output = {}
+    assert performance.update_if_due(0, 4096, out=output) is output
+    assert output["performance_window_ready"] is False
+    assert output["loop_samples"] is None
+    performance.record_loop_duration(100, weight=2)
+    performance.record_loop_duration(400)
+    performance.record_detection_duration(30)
+    performance.record_detection_duration(10)
+    assert performance.update_if_due(window - 1, 2048)["performance_window_ready"] is False
+    sample = performance.update_if_due(window, 3072)
+    assert sample["performance_window_ready"] is True
+    assert sample["performance_window_ms"] == window
+    assert sample["loop_samples"] == 3
+    assert sample["loop_avg_us"] == 200
+    assert sample["loop_max_us"] == 400
+    assert sample["runtime_load_percent"] == pytest.approx(600 * 100 / (window * 1000))
+    assert sample["detection_samples"] == 2
+    assert sample["detection_sum_us"] == 40
+    assert sample["detection_avg_us"] == 20
+    assert sample["detection_min_us"] == 10
+    assert sample["detection_max_us"] == 30
+    assert sample["free_memory_kb"] == 3
+    assert sample["minimum_free_memory_kb"] == 2
+    empty = performance.update_if_due(window * 2, 4096)
+    assert empty["loop_samples"] == empty["detection_samples"] == 0
+    assert empty["loop_avg_us"] == empty["detection_avg_us"] == 0
+    assert empty["runtime_load_percent"] == 0
+    assert empty["minimum_free_memory_kb"] == 2
+    # Returned snapshots remain independent of subsequent window updates.
+    assert sample["loop_samples"] == 3
+
+
+def test_runtime_performance_clamps_invalid_measurements_and_overload():
+    performance = diagnostics.RuntimePerformanceDiagnostics()
+    assert performance.snapshot(-1)["free_memory_kb"] == 0
+    window = performance.WINDOW_INTERVAL_MS
+    performance.update_if_due(0, 1024)
+    performance.record_loop_duration(-10, weight=0)
+    performance.record_loop_duration(window * 2000)
+    performance.record_detection_duration(-10)
+    sample = performance.update_if_due(window, 2048)
+    assert sample["loop_samples"] == 2
+    assert sample["runtime_load_percent"] == 100
+    assert sample["detection_min_us"] == sample["detection_max_us"] == 0
+    assert sample["minimum_free_memory_kb"] == 0
 
 
 def test_micro_heartbeat_uses_the_shared_runtime_status_format():

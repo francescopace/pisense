@@ -191,6 +191,164 @@ def test_discovery_frontends_exclude_streamer() -> None:
     assert device_discovery.SUPPORTED_DISCOVERY_FRONTENDS == ("native", "esphome", "matter", "micro")
 
 
+def discovery_info(**overrides):
+    properties = {
+        b"device_id": b"0x1234",
+        b"frontend": b"native",
+        b"transport": b"http",
+        b"path": b"/espectre/v1",
+        b"txtvers": device_discovery.DNS_SD_TXT_SCHEMA_VERSION.encode(),
+        b"protovers": device_discovery.PROTOCOL_VERSION.encode(),
+        b"capabilities": b"sensing, motion, ,csi",
+    }
+    properties.update(overrides.pop("properties", {}))
+    return SimpleNamespace(
+        properties=properties,
+        port=overrides.pop("port", ESPECTRE_DIRECT_PORT),
+        parsed_addresses=lambda _version: overrides.get("addresses", ["192.168.1.23"]),
+    )
+
+
+@pytest.mark.parametrize("frontend", device_discovery.SUPPORTED_DISCOVERY_FRONTENDS)
+@pytest.mark.parametrize("port", [80, ESPECTRE_DIRECT_PORT])
+def test_discovery_parses_canonical_records(frontend, port):
+    info = discovery_info(port=port, properties={b"frontend": frontend})
+    record = device_discovery._parse_record(ESPECTRE_SERVICE_TYPE, "sensor._espectre._tcp.local.", info)
+
+    assert record.frontend == frontend
+    assert record.device_id == 0x1234
+    assert record.display_id == "0000000000001234"
+    assert record.target_port == port
+    assert record.name == "sensor"
+    assert record.chip == "unknown"
+    authority = "192.168.1.23" if port == 80 else f"192.168.1.23:{port}"
+    assert record.endpoint == f"http://{authority}/espectre/v1"
+    assert record.events_endpoint == f"http://{authority}/espectre/v1/events"
+    serialized = record.as_serializable_dict()
+    assert serialized["device_id"] == record.display_id
+    assert serialized["capabilities"] == ["sensing", "motion", "csi"]
+    assert serialized["metadata"] == {}
+
+
+@pytest.mark.parametrize("properties", [
+    {b"device_id": None}, {b"device_id": b"invalid"}, {b"device_id": b"0"},
+    {b"device_id": b"10000000000000000"}, {b"frontend": b"unknown"},
+    {b"transport": b"mqtt"}, {b"path": b"/other"},
+    {b"txtvers": b"unsupported"}, {b"protovers": b"unsupported"},
+])
+def test_discovery_rejects_incompatible_record_metadata(properties):
+    assert device_discovery._parse_record(
+        ESPECTRE_SERVICE_TYPE, "sensor._espectre._tcp.local.", discovery_info(properties=properties)
+    ) is None
+
+
+@pytest.mark.parametrize("service_type,overrides", [
+    ("_http._tcp.local.", {}), (ESPECTRE_SERVICE_TYPE, {"addresses": []}),
+    (ESPECTRE_SERVICE_TYPE, {"port": 0}), (ESPECTRE_SERVICE_TYPE, {"port": 65536}),
+])
+def test_discovery_rejects_unusable_service_endpoints(service_type, overrides):
+    assert device_discovery._parse_record(service_type, "sensor", discovery_info(**overrides)) is None
+
+
+def test_discovery_listener_updates_filters_and_removes_records():
+    records = {"native": discovery_info(), "micro": discovery_info(properties={b"frontend": b"micro"})}
+    zeroconf = SimpleNamespace(get_service_info=lambda _type, name, **_kwargs: records.get(name))
+    listener = device_discovery._DeviceListener(zeroconf)
+    for name in ["native", "micro", "missing", "native"]:
+        listener.add_service(zeroconf, ESPECTRE_SERVICE_TYPE, name)
+    assert [record.frontend for record in listener.snapshot()] == ["micro", "native"]
+    assert len(listener.snapshot("native")) == 1
+    records["native"] = discovery_info(properties={b"name": b"Renamed sensor", b"chip": b"c3"})
+    listener.update_service(zeroconf, ESPECTRE_SERVICE_TYPE, "native")
+    assert listener.snapshot("native")[0].name == "Renamed sensor"
+    for name in ["native", "native"]:
+        listener.remove_service(zeroconf, ESPECTRE_SERVICE_TYPE, name)
+    assert listener.snapshot("native") == []
+    assert len(listener.snapshot()) == 1
+
+
+@pytest.mark.parametrize("has_record", [False, True])
+def test_discovery_wait_uses_deadline_or_quiet_window(monkeypatch, has_record):
+    clock = [0.0]
+    waits = []
+    monkeypatch.setattr(device_discovery.time, "monotonic", lambda: clock[0])
+    zeroconf = SimpleNamespace(get_service_info=lambda *_args, **_kwargs: discovery_info())
+    listener = device_discovery._DeviceListener(zeroconf)
+    if has_record:
+        listener.add_service(zeroconf, ESPECTRE_SERVICE_TYPE, "sensor")
+
+    def wait(duration):
+        waits.append(duration)
+        clock[0] += duration
+
+    monkeypatch.setattr(listener._records_changed, "wait", wait)
+    listener.wait_for_quiet(2.0, 0.25)
+    assert waits == [0.25 if has_record else 2.0]
+
+
+@pytest.mark.parametrize("browser_fails", [False, True])
+def test_discovery_closes_resources_after_browse(monkeypatch, browser_fails):
+    events = []
+    zeroconf = SimpleNamespace(close=lambda: events.append("close"),
+        get_service_info=lambda *_args, **_kwargs: discovery_info())
+    monkeypatch.setattr(device_discovery, "Zeroconf", lambda **_kwargs: zeroconf)
+    monkeypatch.setattr(device_discovery._DeviceListener, "wait_for_quiet", lambda *_args: None)
+
+    def browser(_zeroconf, service_type, listener):
+        assert service_type == ESPECTRE_SERVICE_TYPE
+        if browser_fails:
+            raise OSError("browse failed")
+        listener.add_service(zeroconf, service_type, "sensor")
+        return SimpleNamespace(cancel=lambda: events.append("cancel"))
+
+    monkeypatch.setattr(device_discovery, "ServiceBrowser", browser)
+    if browser_fails:
+        with pytest.raises(OSError):
+            device_discovery.discover_devices()
+        assert events == ["close"]
+    else:
+        result = device_discovery.discover_devices(frontend="native")
+        assert len(result) == 1
+        assert result[0].device_id == 0x1234
+        assert events == ["cancel", "close"]
+
+
+@pytest.mark.parametrize("options", [
+    {"frontend": "unknown"}, {"timeout_s": 0}, {"timeout_s": float("nan")},
+    {"quiet_window_s": -1}, {"quiet_window_s": float("inf")},
+])
+def test_discovery_validates_options_before_opening_network(monkeypatch, options):
+    opened = []
+    monkeypatch.setattr(device_discovery, "Zeroconf", lambda **_kwargs: opened.append(True))
+    with pytest.raises(ValueError):
+        device_discovery.discover_devices(**options)
+    assert opened == []
+
+
+def test_discovery_reports_unavailable_dependency_or_interfaces(monkeypatch):
+    def unavailable(**_kwargs):
+        raise OSError("no multicast interface")
+
+    monkeypatch.setattr(device_discovery, "Zeroconf", unavailable)
+    with pytest.raises(device_discovery.DeviceDiscoveryError) as error:
+        device_discovery.discover_devices()
+    assert isinstance(error.value.__cause__, OSError)
+    monkeypatch.setattr(device_discovery, "Zeroconf", None)
+    with pytest.raises(device_discovery.DeviceDiscoveryError):
+        device_discovery.discover_devices()
+
+
+def test_discovery_requires_explicit_selection_for_ambiguous_devices(monkeypatch):
+    records = [discovered_device(device_id=1), discovered_device(device_id=2)]
+    with pytest.raises(device_discovery.DeviceDiscoveryError):
+        device_discovery.select_discovered_device(records, interactive=False)
+    with pytest.raises(device_discovery.DeviceDiscoveryError):
+        device_discovery.select_discovered_device(records, chip="s3")
+    choices = iter(["", "invalid", "0", "3", "2"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(choices))
+    assert device_discovery.select_discovered_device(records, frontend_label="native") == records[1]
+
+
 def test_collect_explicit_esphome_target_uses_shared_direct_port(monkeypatch) -> None:
     monkeypatch.setattr(host.socket, "gethostbyname", lambda _host: "192.168.1.23")
     monkeypatch.setattr(host, "discover_devices", lambda **_kwargs: [])

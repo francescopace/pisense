@@ -451,4 +451,106 @@ describe('Direct HTTP request and SSE lifecycle', () => {
         await assert.rejects(client.request('get', 'capabilities', {}, { allowBeforeHandshake: true }), (error) => error.code === 'http_429');
         client.close();
     });
+
+    it('rejects invalid requests before sending HTTP traffic', async () => {
+        const { client, calls } = await connectedClient();
+        for (const [method, resource, data, code] of [
+            ['trace', 'health', {}, 'invalid_method'],
+            ['get', '../health', {}, 'invalid_resource'],
+            ['get', 'health', null, 'invalid_params'],
+            ['get', 'health', [], 'invalid_params'],
+            ['get', 'health', { value: 'é'.repeat(Client.MAX_REQUEST_FRAME_BYTES / 2) }, 'frame_too_large']
+        ]) {
+            await assert.rejects(client.request(method, resource, data), (error) => error.code === code);
+        }
+        assert.equal(calls.length, 1);
+        client.close();
+        await assert.rejects(client.request('get', 'health'), (error) => error.code === 'not_connected');
+    });
+
+    it('keeps mutations blocked after an incompatible capability handshake', async () => {
+        for (const capabilities of [
+            { protocol_version: 'unsupported', operations: [] },
+            { protocol_version: Client.PROTOCOL_VERSION },
+            { protocol_version: Client.PROTOCOL_VERSION, operations: [null] },
+            { protocol_version: Client.PROTOCOL_VERSION, operations: [{ name: '../sensing' }] }
+        ]) {
+            const { client, calls } = await connectedClient({ resultFor: () => capabilities });
+            await assert.rejects(client.handshake(), (error) => error.code === 'invalid_capabilities');
+            assert.equal(client.compatible, false);
+            assert.equal(client.capabilities, null);
+            await assert.rejects(client.request('patch', 'sensing', { enabled: true }),
+                (error) => error.code === 'handshake_required');
+            assert.equal(calls.length, 2);
+            client.close();
+        }
+    });
+
+    it('distinguishes malformed responses from device command rejections', async () => {
+        const { client } = await connectedClient({ resultFor: () => ({
+            protocol_version: Client.PROTOCOL_VERSION, operations: [{ name: 'update_sensing' }]
+        }) });
+        const capabilities = await client.handshake();
+        assert.equal(client.compatible, true);
+        assert.deepEqual(client.capabilities, capabilities);
+        for (const [payload, code] of [
+            ['{', 'invalid_json'],
+            ['null', 'invalid_envelope'],
+            ['[]', 'invalid_envelope'],
+            ['{}', 'invalid_envelope'],
+            [JSON.stringify({ accepted: false, code: 'busy', message: 'busy' }), 'busy']
+        ]) {
+            let requests = 0;
+            globalThis.fetch = async () => {
+                requests += 1;
+                return { ok: true, status: 202, text: async () => payload };
+            };
+            await assert.rejects(client.request('patch', 'sensing', { enabled: true }),
+                (error) => error.code === code);
+            assert.equal(requests, 1);
+        }
+        client.close();
+        assert.equal(client.compatible, false);
+        assert.equal(client.capabilities, null);
+    });
+
+    it('decodes response text with UTF-8 characters split across stream chunks', async () => {
+        const { client } = await connectedClient();
+        const payload = new TextEncoder().encode(JSON.stringify({ name: 'café' }));
+        const split = payload.indexOf(0xc3) + 1;
+        let released = false;
+        globalThis.fetch = async () => {
+            const chunks = [payload.subarray(0, split), payload.subarray(split)];
+            return { ok: true, status: 200, body: { getReader: () => ({
+                read: async () => chunks.length ? { value: chunks.shift(), done: false } : { done: true },
+                releaseLock() { released = true; }
+            }) } };
+        };
+        assert.deepEqual(await client.request('get', 'info'), { name: 'café' });
+        assert.equal(released, true);
+        client.close();
+    });
+
+    it('enforces the response byte limit when streaming is unavailable', async () => {
+        const { client } = await connectedClient();
+        globalThis.fetch = async () => ({ ok: true, status: 200,
+            text: async () => JSON.stringify({ value: 'é'.repeat(Client.MAX_RESPONSE_FRAME_BYTES / 2) }) });
+        await assert.rejects(client.request('get', 'info'), (error) => error.code === 'frame_too_large');
+        client.close();
+    });
+
+    it('supports removing event listeners across reconnects', async () => {
+        installHttpFixture();
+        const client = new Client('192.168.1.42');
+        let opens = 0;
+        const unsubscribe = client.on('open', () => { opens += 1; });
+        await client.connect();
+        assert.equal(opens, 1);
+        client.close();
+        unsubscribe();
+        await client.connect();
+        assert.equal(opens, 1);
+        assert.equal(client.connected, true);
+        client.close();
+    });
 });

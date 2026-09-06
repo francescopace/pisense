@@ -9,6 +9,7 @@
  */
 #include "test_harness.h"
 
+#include <algorithm>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -20,6 +21,7 @@
 #undef private
 
 #include "esp_timer.h"
+#include "csi_format.h"
 #include "csi_traffic_fakes.h"
 #include "nvs.h"
 #include "runtime_detector_store.h"
@@ -46,11 +48,13 @@ class DetectorListener : public IRuntimeListener {
     calibration_finishes++;
     last_calibration_success = success;
   }
+  void on_runtime_fault(const char *) override { faults++; }
 
   int detector_changes{0};
   int threshold_changes{0};
   int calibration_starts{0};
   int calibration_finishes{0};
+  int faults{0};
   std::string last_detector;
   float last_threshold{0.0f};
   bool last_calibration_success{true};
@@ -63,6 +67,9 @@ bool accept_raw_packet(void *, const RawCsiPacketView &) { return true; }
 void setUp(void) {
   nvs_mock_reset();
   esp_timer_mock::reset();
+  esp_event_mock_reset();
+  esp_netif_mock_reset();
+  esp_wifi_mock_reset();
 }
 void tearDown(void) {}
 
@@ -137,6 +144,124 @@ void test_runtime_detector_configuration_preserves_the_requested_threshold(void)
   TEST_ASSERT_TRUE(runtime.stop_raw_collection(RawCsiStopReason::REQUESTED));
   TEST_ASSERT_EQUAL_FLOAT(0.68f, runtime.get_snapshot().threshold);
   TEST_ASSERT_EQUAL_FLOAT(0.68f, runtime.detector_->get_threshold());
+  runtime.shutdown();
+}
+
+void test_runtime_calibration_consumes_evaluations_resets_on_gaps_and_finishes(void) {
+  RuntimeConfig config;
+  config.detection_algorithm = DetectionAlgorithm::LIGHTWEIGHT;
+  FakeCsiTrafficGenerator traffic_generator;
+  FakeCsiTrafficIngress traffic_ingress;
+  EspIdfRuntime runtime(config, traffic_generator, traffic_ingress);
+  DetectorListener listener;
+  runtime.set_listener(&listener);
+  TEST_ASSERT_TRUE(runtime.setup());
+  esp_netif_ip_info_t ip_info{};
+  ip_info.ip.addr = 0x0101A8C0U;
+  ip_info.gw.addr = 0x0101A8C0U;
+  runtime.on_wifi_connected_(ip_info);
+  TEST_ASSERT_TRUE(runtime.is_calibrating());
+  const uint16_t target = runtime.get_snapshot().calibration_target_packets;
+  int8_t csi[HT20_CSI_LEN];
+  std::fill(std::begin(csi), std::end(csi), 8);
+  TEST_ASSERT_FALSE(EspIdfRuntime::threshold_calibration_packet_callback_(
+      nullptr, csi, sizeof(csi), -50, true, 1U, false));
+  TEST_ASSERT_TRUE(runtime.handle_threshold_calibration_packet_(csi, sizeof(csi), -50, false, 1U, false));
+  TEST_ASSERT_EQUAL(0, runtime.get_snapshot().calibration_packets);
+  // An evaluation cannot count calibration packets before the detector is ready.
+  TEST_ASSERT_TRUE(runtime.handle_threshold_calibration_packet_(csi, sizeof(csi), -50, true, 1U, false));
+  TEST_ASSERT_EQUAL(0, runtime.get_snapshot().calibration_packets);
+  for (uint32_t index = 0; index < target && runtime.get_snapshot().calibration_packets < 2U; ++index) {
+    TEST_ASSERT_TRUE(EspIdfRuntime::threshold_calibration_packet_callback_(
+        &runtime, csi, sizeof(csi), -50, true, 1U, false));
+  }
+  TEST_ASSERT_EQUAL(2, runtime.get_snapshot().calibration_packets);
+  TEST_ASSERT_TRUE(runtime.handle_threshold_calibration_packet_(csi, sizeof(csi), -50, true, 1U, true));
+  TEST_ASSERT_EQUAL(1, runtime.get_snapshot().calibration_packets);
+  for (uint32_t index = 0; index < target && runtime.threshold_calibration_active_.load(); ++index) {
+    TEST_ASSERT_TRUE(runtime.handle_threshold_calibration_packet_(csi, sizeof(csi), -50, true, 1U, false));
+  }
+  TEST_ASSERT_FALSE(runtime.threshold_calibration_active_.load());
+  TEST_ASSERT_EQUAL(target, runtime.get_snapshot().calibration_packets);
+  runtime.loop();
+  TEST_ASSERT_FALSE(runtime.is_calibrating());
+  TEST_ASSERT_EQUAL(1, listener.calibration_finishes);
+  TEST_ASSERT_TRUE(listener.last_calibration_success);
+  TEST_ASSERT_EQUAL_FLOAT(runtime.detector_->get_threshold(), runtime.get_snapshot().threshold);
+  TEST_ASSERT_EQUAL_FLOAT(runtime.get_snapshot().threshold, runtime.get_snapshot().startup_threshold);
+  TEST_ASSERT_EQUAL(0, runtime.get_snapshot().calibration_target_packets);
+  TEST_ASSERT_FALSE(runtime.handle_threshold_calibration_packet_(csi, sizeof(csi), -50, true, 1U, false));
+  runtime.loop();
+  TEST_ASSERT_EQUAL(1, listener.calibration_finishes);
+  runtime.shutdown();
+}
+
+void test_runtime_rejects_invalid_detector_geometry_before_starting_services(void) {
+  for (int field = 0; field < 3; ++field) {
+    RuntimeConfig config;
+    if (field == 0) config.csi_target_pps = RUNTIME_CSI_TARGET_PPS_MIN - 1U;
+    if (field == 1) config.segmentation_window_size_ms = RUNTIME_SEGMENTATION_WINDOW_SIZE_MS_MAX + 1U;
+    if (field == 2) config.segmentation_threshold = -1.0f;
+    FakeCsiTrafficGenerator generator;
+    FakeCsiTrafficIngress ingress;
+    EspIdfRuntime runtime(config, generator, ingress);
+    DetectorListener listener;
+    runtime.set_listener(&listener);
+    TEST_ASSERT_FALSE(runtime.setup());
+    TEST_ASSERT_EQUAL(1, listener.faults);
+    TEST_ASSERT_EQUAL(0U, generator.start_calls);
+    TEST_ASSERT_EQUAL(0U, ingress.start_calls);
+    runtime.shutdown();
+  }
+}
+
+void test_runtime_rejects_invalid_or_unpersisted_controls_without_changing_config(void) {
+  RuntimeConfig config;
+  config.runtime_detector_selection_enabled = true;
+  FakeCsiTrafficGenerator generator;
+  FakeCsiTrafficIngress ingress;
+  EspIdfRuntime runtime(config, generator, ingress);
+  TEST_ASSERT_TRUE(runtime.setup());
+  TEST_ASSERT_FALSE(runtime.set_motion_hits_runtime(RUNTIME_MOTION_HITS_MIN - 1U, config.motion_off_hits));
+  TEST_ASSERT_FALSE(runtime.set_motion_hits_runtime(config.motion_on_hits, RUNTIME_MOTION_HITS_MAX + 1U));
+  TEST_ASSERT_FALSE(runtime.set_csi_traffic_mode_runtime(static_cast<CsiTrafficMode>(255)));
+  TEST_ASSERT_FALSE(runtime.set_traffic_generator_mode_runtime(static_cast<RuntimeTrafficMode>(255)));
+  TEST_ASSERT_FALSE(runtime.set_detection_algorithm_runtime(static_cast<DetectionAlgorithm>(255)));
+  TEST_ASSERT_FALSE(runtime.set_threshold_runtime(-1.0f));
+  nvs_mock_set_open_result(ESP_FAIL);
+  TEST_ASSERT_FALSE(runtime.set_motion_hits_runtime(7U, 5U));
+  TEST_ASSERT_FALSE(runtime.set_traffic_generator_mode_runtime(RuntimeTrafficMode::DNS));
+  TEST_ASSERT_FALSE(runtime.set_detection_algorithm_runtime(DetectionAlgorithm::HIGH_ACCURACY));
+  TEST_ASSERT_TRUE(runtime.effective_config().traffic_generator_mode == config.traffic_generator_mode);
+  TEST_ASSERT_TRUE(runtime.effective_config().detection_algorithm == config.detection_algorithm);
+  TEST_ASSERT_EQUAL(config.motion_on_hits, runtime.effective_config().motion_on_hits);
+  TEST_ASSERT_EQUAL(config.motion_off_hits, runtime.effective_config().motion_off_hits);
+  runtime.shutdown();
+}
+
+void test_runtime_restores_internal_traffic_when_external_source_cannot_start(void) {
+  RuntimeConfig config;
+  config.detection_algorithm = DetectionAlgorithm::HIGH_ACCURACY;
+  FakeCsiTrafficGenerator generator;
+  FakeCsiTrafficIngress ingress;
+  EspIdfRuntime runtime(config, generator, ingress);
+  DetectorListener listener;
+  runtime.set_listener(&listener);
+  TEST_ASSERT_TRUE(runtime.setup());
+  esp_netif_ip_info_t ip_info{};
+  ip_info.ip.addr = ip_info.gw.addr = 0x0101A8C0U;
+  runtime.on_wifi_connected_(ip_info);
+  ingress.start_result = false;
+  TEST_ASSERT_FALSE(runtime.set_csi_traffic_mode_runtime(CsiTrafficMode::EXTERNAL));
+  TEST_ASSERT_TRUE(runtime.effective_config().csi_traffic_mode == CsiTrafficMode::INTERNAL);
+  TEST_ASSERT_TRUE(generator.is_running());
+  TEST_ASSERT_FALSE(ingress.is_running());
+  TEST_ASSERT_EQUAL(1, listener.faults);
+  generator.start_result = false;
+  TEST_ASSERT_FALSE(runtime.set_traffic_generator_mode_runtime(RuntimeTrafficMode::DNS));
+  TEST_ASSERT_TRUE(runtime.effective_config().traffic_generator_mode == config.traffic_generator_mode);
+  TEST_ASSERT_FALSE(generator.is_running());
+  TEST_ASSERT_TRUE(listener.faults > 1);
   runtime.shutdown();
 }
 
@@ -664,6 +789,10 @@ int main(int argc, char **argv) {
   (void)argc;
   (void)argv;
   UNITY_BEGIN();
+  RUN_TEST(test_runtime_calibration_consumes_evaluations_resets_on_gaps_and_finishes);
+  RUN_TEST(test_runtime_rejects_invalid_detector_geometry_before_starting_services);
+  RUN_TEST(test_runtime_rejects_invalid_or_unpersisted_controls_without_changing_config);
+  RUN_TEST(test_runtime_restores_internal_traffic_when_external_source_cannot_start);
   RUN_TEST(test_runtime_detector_switch_updates_pipeline_threshold_and_calibration);
   RUN_TEST(test_runtime_detector_configuration_preserves_the_requested_threshold);
   RUN_TEST(test_runtime_traffic_updates_roll_back_when_persistence_fails);

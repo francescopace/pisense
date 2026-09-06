@@ -15,10 +15,15 @@
 #undef private
 
 #include "esp_http_client.h"
+#include "esp_https_ota.h"
 
 using namespace espectre;
 
-void setUp(void) { esp_http_client_mock_reset(); }
+void setUp(void) {
+  esp_http_client_mock_reset();
+  g_esp_https_ota_calls = 0;
+  g_esp_https_ota_result = ESP_OK;
+}
 void tearDown(void) {}
 
 namespace {
@@ -151,6 +156,95 @@ void test_https_ota_check_updates_status_and_delivers_callback(void) {
   TEST_ASSERT_FALSE(service.start_check("3.0.0"));
 }
 
+void test_https_ota_update_applies_newer_image_and_delivers_completion_once(void) {
+  HttpsOtaService service("native", "esp32s2", OtaReleaseChannel::DEVELOP);
+  g_esp_http_client_mock.response_body = firmware_catalog(std::string("[") + kOtaArtifact + "]");
+  int preparations = 0;
+  int completions = 0;
+  service.set_prepare_for_update_callback([&]() { preparations++; });
+  service.set_status_callback([&](const EspectreOtaStatus &status) {
+    completions++;
+    TEST_ASSERT_TRUE(status.state == EspectreOtaState::REBOOT_SCHEDULED);
+    TEST_ASSERT_FALSE(status.busy);
+  });
+
+  TEST_ASSERT_TRUE(service.start_update("3.0.0"));
+  TEST_ASSERT_EQUAL(1, g_esp_https_ota_calls);
+  TEST_ASSERT_EQUAL(1, g_esp_http_client_mock.cleanup_calls);
+  const auto status = service.status();
+  TEST_ASSERT_TRUE(status.state == EspectreOtaState::REBOOT_SCHEDULED);
+  TEST_ASSERT_EQUAL_STRING("3.1.0", status.target_version.c_str());
+  TEST_ASSERT_EQUAL_STRING("https://example.invalid/fw.bin", status.image_url.c_str());
+  service.loop();
+  service.loop();
+  TEST_ASSERT_EQUAL(1, preparations);
+  TEST_ASSERT_EQUAL(1, completions);
+  service.shutdown();
+  service.loop();
+  TEST_ASSERT_FALSE(service.start_update("3.0.0"));
+  TEST_ASSERT_TRUE(service.status().state == EspectreOtaState::REBOOT_SCHEDULED);
+}
+
+void test_https_ota_update_never_installs_same_older_or_unordered_versions(void) {
+  for (const char *current : {"3.1.0", "4.0.0", "3.0.0"}) {
+    HttpsOtaService service("native", "esp32s2", OtaReleaseChannel::DEVELOP);
+    const bool unordered = std::string(current) == "3.0.0";
+    g_esp_http_client_mock.response_body = firmware_catalog(
+        std::string("[") + kOtaArtifact + "]", "develop", unordered ? "snapshot" : "3.1.0");
+    TEST_ASSERT_TRUE(service.start_update(current, "develop"));
+    const auto status = service.status();
+    const auto expected = unordered ? EspectreOtaState::ERROR : EspectreOtaState::UP_TO_DATE;
+    TEST_ASSERT_TRUE(status.state == expected);
+    TEST_ASSERT_FALSE(status.busy);
+    TEST_ASSERT_FALSE(status.update_available);
+    TEST_ASSERT_EQUAL(0, g_esp_https_ota_calls);
+  }
+}
+
+void test_https_ota_failure_retains_target_and_allows_retry(void) {
+  HttpsOtaService service("native", "esp32s2", OtaReleaseChannel::DEVELOP);
+  g_esp_http_client_mock.response_body = firmware_catalog(std::string("[") + kOtaArtifact + "]");
+  g_esp_https_ota_result = ESP_FAIL;
+  TEST_ASSERT_TRUE(service.start_update("3.0.0"));
+  const auto failure = service.status();
+  TEST_ASSERT_TRUE(failure.state == EspectreOtaState::ERROR);
+  TEST_ASSERT_FALSE(failure.busy);
+  TEST_ASSERT_EQUAL_STRING("3.1.0", failure.target_version.c_str());
+  TEST_ASSERT_EQUAL_STRING("https://example.invalid/fw.bin", failure.image_url.c_str());
+  g_esp_https_ota_result = ESP_OK;
+  TEST_ASSERT_TRUE(service.start_update("3.0.0"));
+  TEST_ASSERT_TRUE(service.status().state == EspectreOtaState::REBOOT_SCHEDULED);
+  TEST_ASSERT_EQUAL(2, g_esp_https_ota_calls);
+}
+
+void test_https_ota_check_rejects_unordered_version_and_bad_manifest(void) {
+  HttpsOtaService service("native", "esp32s2", OtaReleaseChannel::DEVELOP);
+  g_esp_http_client_mock.response_body = firmware_catalog(
+      std::string("[") + kOtaArtifact + "]", "develop", "snapshot");
+  TEST_ASSERT_TRUE(service.start_check("3.0.0"));
+  TEST_ASSERT_TRUE(service.status().state == EspectreOtaState::ERROR);
+  g_esp_http_client_mock.response_body = "invalid";
+  TEST_ASSERT_TRUE(service.start_check("3.0.0"));
+  TEST_ASSERT_TRUE(service.status().state == EspectreOtaState::ERROR);
+  TEST_ASSERT_FALSE(service.status().busy);
+  TEST_ASSERT_EQUAL(0, g_esp_https_ota_calls);
+}
+
+void test_https_ota_fetch_releases_client_after_transport_error(void) {
+  HttpsOtaService service("native", "esp32s2", OtaReleaseChannel::DEVELOP);
+  std::string body = "stale";
+  std::string error;
+  g_esp_http_client_mock.init_succeeds = false;
+  TEST_ASSERT_FALSE(service.fetch_https_text_("https://example.invalid/manifest.json", &body, &error));
+  TEST_ASSERT_TRUE(body.empty());
+  TEST_ASSERT_FALSE(error.empty());
+  TEST_ASSERT_EQUAL(0, g_esp_http_client_mock.cleanup_calls);
+  g_esp_http_client_mock.init_succeeds = true;
+  g_esp_http_client_mock.perform_result = ESP_FAIL;
+  TEST_ASSERT_FALSE(service.fetch_https_text_("https://example.invalid/manifest.json", &body, &error));
+  TEST_ASSERT_EQUAL(1, g_esp_http_client_mock.cleanup_calls);
+}
+
 int process(void) {
   UNITY_BEGIN();
   RUN_TEST(test_https_ota_manifest_parser_selects_frontend_chip_and_ota_image);
@@ -158,6 +252,11 @@ int process(void) {
   RUN_TEST(test_https_ota_manifest_parser_validates_catalog_metadata);
   RUN_TEST(test_https_ota_fetch_enforces_status_and_manifest_size);
   RUN_TEST(test_https_ota_check_updates_status_and_delivers_callback);
+  RUN_TEST(test_https_ota_update_applies_newer_image_and_delivers_completion_once);
+  RUN_TEST(test_https_ota_update_never_installs_same_older_or_unordered_versions);
+  RUN_TEST(test_https_ota_failure_retains_target_and_allows_retry);
+  RUN_TEST(test_https_ota_check_rejects_unordered_version_and_bad_manifest);
+  RUN_TEST(test_https_ota_fetch_releases_client_after_transport_error);
   return UNITY_END();
 }
 

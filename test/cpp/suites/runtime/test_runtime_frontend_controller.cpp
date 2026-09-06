@@ -13,6 +13,9 @@
 #include "frontend_runtime_shim.h"
 #include "runtime_config_utils.h"
 #include "runtime_frontend_controller.h"
+#include "frontend_bootstrap_helpers.h"
+#include "device_config_store.h"
+#include "nvs.h"
 
 #include <string>
 
@@ -59,9 +62,85 @@ class DummyRuntimeListener : public IRuntimeListener {
 
 }  // namespace
 
-void setUp(void) { frontend_runtime_shim::reset(); }
+void setUp(void) {
+  frontend_runtime_shim::reset();
+  nvs_mock_reset();
+  esp_event_mock_reset();
+  esp_netif_mock_reset();
+  esp_wifi_mock_reset();
+}
 
 void tearDown(void) {}
+
+void test_frontend_bootstrap_loads_defaults_and_preserves_runtime_identity(void) {
+  FrontendDeviceConfigDefaults defaults;
+  defaults.runtime_device_id = 0x1234U;
+  defaults.device_label = "Default device";
+  defaults.mqtt_scheme = "mqtt";
+  defaults.mqtt_host = "broker.local";
+  defaults.mqtt_port = 1883U;
+  defaults.mqtt_username = "user";
+  defaults.mqtt_password = "test-password";
+  defaults.topic_prefix = "test/devices";
+  auto config = load_frontend_device_config(defaults, "test", "loaded", nullptr);
+  TEST_ASSERT_TRUE(defaults.runtime_device_id == config.device_id);
+  TEST_ASSERT_EQUAL_STRING(defaults.device_label, config.device_label.c_str());
+  TEST_ASSERT_EQUAL_STRING(defaults.mqtt_host, config.mqtt_host.c_str());
+  TEST_ASSERT_EQUAL_STRING(defaults.topic_prefix, config.topic_prefix.c_str());
+  config.device_label = "Stored device";
+  config.device_id = 0x5678U;
+  TEST_ASSERT_EQUAL(ESP_OK, save_stored_device_config(config));
+  const auto loaded = load_frontend_device_config(defaults, "test", "loaded", "load failed");
+  TEST_ASSERT_EQUAL_STRING("Stored device", loaded.device_label.c_str());
+  TEST_ASSERT_EQUAL_STRING("test-password", loaded.mqtt_password.c_str());
+  TEST_ASSERT_TRUE(defaults.runtime_device_id == loaded.device_id);
+
+  nvs_mock_set_open_result(ESP_FAIL);
+  const auto fallback = load_frontend_device_config(defaults, "test", nullptr, nullptr);
+  TEST_ASSERT_EQUAL_STRING(defaults.device_label, fallback.device_label.c_str());
+  TEST_ASSERT_TRUE(defaults.runtime_device_id == fallback.device_id);
+}
+
+void test_frontend_bootstrap_accepts_optional_defaults_and_validates_wifi_options(void) {
+  FrontendDeviceConfigDefaults defaults;
+  defaults.device_label = defaults.mqtt_scheme = defaults.mqtt_host = nullptr;
+  defaults.mqtt_username = defaults.mqtt_password = defaults.topic_prefix = nullptr;
+  const auto config = load_frontend_device_config(defaults, "test", nullptr, nullptr);
+  TEST_ASSERT_TRUE(derive_runtime_device_id() == config.device_id);
+  TEST_ASSERT_EQUAL_STRING(ESPECTRE_DEFAULT_DEVICE_LABEL, config.device_label.c_str());
+  TEST_ASSERT_TRUE(config.mqtt_host.empty());
+  TEST_ASSERT_EQUAL_STRING(ESPECTRE_TOPIC_PREFIX, config.topic_prefix.c_str());
+
+  StandaloneWifiService wifi;
+  WifiProvisioningService provisioning(&wifi);
+  FrontendWifiStationOptions options;
+  TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, setup_frontend_wifi_station(nullptr, &wifi, options, "test", nullptr));
+  options.start_manager = true;
+  TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, setup_frontend_wifi_station(&provisioning, nullptr, options, "test", nullptr));
+  options.configured_channel = 255;
+  TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, setup_frontend_wifi_station(&provisioning, &wifi, options, "test", nullptr));
+  options.configured_channel = 0;
+  options.band_policy = static_cast<WifiBandPolicy>(255);
+  TEST_ASSERT_EQUAL(ESP_ERR_NOT_SUPPORTED, setup_frontend_wifi_station(&provisioning, &wifi, options, "test", nullptr));
+  TEST_ASSERT_EQUAL(0, g_esp_wifi_mock.start_call_count);
+}
+
+void test_frontend_bootstrap_sets_up_wifi_and_propagates_start_failure(void) {
+  StandaloneWifiService wifi;
+  WifiProvisioningService provisioning(&wifi);
+  FrontendWifiStationOptions options;
+  options.ssid = "TestSSID";
+  options.password = "test-password";
+  options.configured_channel = 6;
+  options.start_manager = true;
+  g_esp_wifi_mock.start_result_count = 1;
+  g_esp_wifi_mock.start_results[0] = ESP_FAIL;
+  TEST_ASSERT_EQUAL(ESP_FAIL, setup_frontend_wifi_station(&provisioning, &wifi, options, "test", nullptr));
+  TEST_ASSERT_EQUAL_STRING(options.ssid, provisioning.config().ssid.c_str());
+  TEST_ASSERT_EQUAL_UINT8(6, provisioning.config().channel);
+  TEST_ASSERT_EQUAL(1, g_esp_wifi_mock.start_call_count);
+  wifi.shutdown();
+}
 
 void test_runtime_frontend_controller_preserves_pre_setup_config_and_snapshot(void) {
   RuntimeFrontendController controller;
@@ -471,6 +550,9 @@ void test_runtime_frontend_controller_switches_detector_and_resets_threshold(voi
 
 int process(void) {
   UNITY_BEGIN();
+  RUN_TEST(test_frontend_bootstrap_loads_defaults_and_preserves_runtime_identity);
+  RUN_TEST(test_frontend_bootstrap_accepts_optional_defaults_and_validates_wifi_options);
+  RUN_TEST(test_frontend_bootstrap_sets_up_wifi_and_propagates_start_failure);
   RUN_TEST(test_runtime_frontend_controller_preserves_pre_setup_config_and_snapshot);
   RUN_TEST(test_runtime_frontend_controller_rejects_invalid_config_before_backend_setup);
   RUN_TEST(test_runtime_frontend_controller_keeps_staged_mutations_out_of_live_validation);

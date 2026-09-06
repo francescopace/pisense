@@ -29,6 +29,7 @@ SCRIPTS_DIR = REPO_ROOT / ".github" / "scripts"
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 PROTOCOL_HEADER = REPO_ROOT / "src" / "cpp" / "runtime" / "espectre_protocol.h"
 PYTHON_COVERAGE_THRESHOLDS = REPO_ROOT / "test" / "python" / "coverage-thresholds.json"
+PYTHON_COVERAGE_RUNNER = REPO_ROOT / "test" / "python" / "run_coverage.sh"
 BUILD_PAGES_ACTION = REPO_ROOT / ".github" / "actions" / "build-pages" / "action.yml"
 WEB_COVERAGE_RUNNER = REPO_ROOT / "test" / "web" / "run_coverage.sh"
 WEB_COVERAGE_THRESHOLDS = REPO_ROOT / "test" / "web" / "coverage-thresholds.json"
@@ -81,10 +82,14 @@ def test_ci_chip_matrices_follow_production_registries() -> None:
     assert "if: always() && hashFiles('.cache/reports/coverage/coverage-cpp-runtime.json') != ''" in cpp_job
 
     python_job = _workflow_job(source, "test-python")
-    assert "--cov-branch" in python_job
-    assert "--cov-report=json:.cache/reports/coverage/python-coverage.json" in python_job
-    assert "--cov-report=xml" not in python_job
-    assert "python test/python/check_coverage.py .cache/reports/coverage/python-coverage.json" in python_job
+    python_runner = PYTHON_COVERAGE_RUNNER.read_text(encoding="utf-8")
+    assert "./test/python/run_coverage.sh" in python_job
+    assert "--cov=src/python/micro_espectre" in python_runner
+    assert "--cov=src/python/espectre_cli" in python_runner
+    assert "--cov-branch" in python_runner
+    assert '--cov-report="json:$REPORT"' in python_runner
+    assert '.cache/reports/coverage/python-coverage.json' in python_runner
+    assert 'test/python/check_coverage.py "$REPORT"' in python_runner
     assert "--kind python" in python_job
     assert "--report .cache/reports/coverage/python-coverage.json" in python_job
     assert "--output .cache/reports/coverage/coverage-python.json" in python_job
@@ -131,32 +136,29 @@ def test_python_coverage_gate_has_fixed_thresholds() -> None:
     thresholds = json.loads(PYTHON_COVERAGE_THRESHOLDS.read_text(encoding="utf-8"))
 
     assert thresholds == {
-        "minimums": {"branches": 50.0, "lines": 60.0},
+        "minimums": {"branches": 60.0, "lines": 70.0},
         "version": 1,
     }
 
 
-@pytest.mark.parametrize(
-    ("covered_lines", "covered_branches", "failure"),
-    [
-        (60, 50, None),
-        (59, 50, "lines: 59.00% < 60.00%"),
-        (60, 49, "branches: 49.00% < 50.00%"),
-    ],
-)
+@pytest.mark.parametrize("failing_metric", [None, "lines", "branches"])
 def test_python_coverage_gate_enforces_each_metric(
     tmp_path: Path,
-    covered_lines: int,
-    covered_branches: int,
-    failure: str | None,
+    failing_metric: str | None,
 ) -> None:
+    minimums = json.loads(PYTHON_COVERAGE_THRESHOLDS.read_text(encoding="utf-8"))["minimums"]
+    measured = dict(minimums)
+    failure = None
+    if failing_metric:
+        measured[failing_metric] -= 1
+        failure = f"{failing_metric}: {measured[failing_metric]:.2f}% < {minimums[failing_metric]:.2f}%"
     report = tmp_path / "coverage.json"
     report.write_text(
         json.dumps(
             {
                 "totals": {
-                    "covered_branches": covered_branches,
-                    "covered_lines": covered_lines,
+                    "covered_branches": measured["branches"],
+                    "covered_lines": measured["lines"],
                     "num_branches": 100,
                     "num_statements": 100,
                 }
@@ -235,12 +237,19 @@ def test_coverage_badge_builder_reads_each_report_format(
     python_report = tmp_path / "python.json"
     cpp_report = tmp_path / "cpp.json"
     web_report = tmp_path / "web.log"
+    cpp_thresholds = REPO_ROOT / "test" / "cpp" / "coverage-thresholds.json"
+    python_minimums = json.loads(PYTHON_COVERAGE_THRESHOLDS.read_text(encoding="utf-8"))["minimums"]
+    cpp_minimums = json.loads(cpp_thresholds.read_text(encoding="utf-8"))["segments"]["runtime"]
+    web_minimums = json.loads(WEB_COVERAGE_THRESHOLDS.read_text(encoding="utf-8"))["minimums"]
+    python_metrics = {metric: value + 1 for metric, value in python_minimums.items()}
+    cpp_metrics = {metric: value + 1 for metric, value in cpp_minimums.items()}
+    web_metrics = {metric: value + 1.25 for metric, value in web_minimums.items()}
     python_report.write_text(
         json.dumps(
             {
                 "totals": {
-                    "covered_branches": 51,
-                    "covered_lines": 61,
+                    "covered_branches": python_metrics["branches"],
+                    "covered_lines": python_metrics["lines"],
                     "num_branches": 100,
                     "num_statements": 100,
                 }
@@ -252,24 +261,20 @@ def test_coverage_badge_builder_reads_each_report_format(
         json.dumps(
             {
                 "segments": {
-                    "runtime": {
-                        "branches": 51.0,
-                        "functions": 86.0,
-                        "lines": 81.0,
-                    }
+                    "runtime": cpp_metrics
                 }
             }
         ),
         encoding="utf-8",
     )
     web_report.write_text(
-        "# all files | 88.98 | 76.25 | 74.24 |\n",
+        f"# all files | {web_metrics['lines']:.2f} | {web_metrics['branches']:.2f} | {web_metrics['functions']:.2f} |\n",
         encoding="utf-8",
     )
 
     expected_python_badge = {
         "subject": "python coverage",
-        "status": "61.00%",
+        "status": f"{python_metrics['lines']:.2f}%",
         "color": "4c1",
     }
     assert builder.build_badge(
@@ -277,17 +282,17 @@ def test_coverage_badge_builder_reads_each_report_format(
     ) == expected_python_badge
     expected_cpp_badge = {
         "subject": "c++ coverage",
-        "status": "81.00%",
+        "status": f"{cpp_metrics['lines']:.2f}%",
         "color": "4c1",
     }
     assert builder.build_badge(
         "cpp-runtime",
         cpp_report,
-        REPO_ROOT / "test" / "cpp" / "coverage-thresholds.json",
+        cpp_thresholds,
     ) == expected_cpp_badge
     expected_web_badge = {
         "subject": "web coverage",
-        "status": "88.98%",
+        "status": f"{web_metrics['lines']:.2f}%",
         "color": "4c1",
     }
     assert builder.build_badge(
@@ -323,12 +328,9 @@ def test_coverage_badge_builder_reads_each_report_format(
     assert json.loads(output.read_text(encoding="utf-8")) == expected_python_badge
     assert not summary_path.exists()
 
-    python_report.write_text(
-        python_report.read_text(encoding="utf-8").replace(
-            '"covered_lines": 61', '"covered_lines": 59'
-        ),
-        encoding="utf-8",
-    )
+    failing_report = json.loads(python_report.read_text(encoding="utf-8"))
+    failing_report["totals"]["covered_lines"] = python_minimums["lines"] - 1
+    python_report.write_text(json.dumps(failing_report), encoding="utf-8")
     assert builder.build_badge(
         "python", python_report, PYTHON_COVERAGE_THRESHOLDS
     )["color"] == "e05d44"

@@ -104,7 +104,7 @@ Use the Docker-backed GCC 13 runner to reproduce the Linux/amd64 coverage toolch
 ./test/cpp/run_gcc13_coverage.sh --ci
 ```
 
-CI compares those canonical GCC results with the fixed runtime gates in `coverage-thresholds.json`: 80% line coverage, 85% function coverage, and 50% branch coverage. These thresholds are deliberate policy and are not generated from the latest run.
+CI compares those canonical GCC results with the fixed runtime gates in `coverage-thresholds.json`: 85% line coverage, 85% function coverage, and 50% branch coverage. These thresholds are deliberate policy and are not generated from the latest run.
 
 The Docker image is built locally and reused through Docker's build cache. The runner uses `linux/amd64` explicitly so Apple Silicon hosts match the GitHub-hosted runner architecture.
 

@@ -832,6 +832,125 @@ void test_standalone_wifi_service_reports_asynchronous_scan_snapshot(void) {
   TEST_ASSERT_EQUAL_UINT8(6U, observed[0].channel);
 }
 
+void test_standalone_wifi_service_setup_failure_unregisters_partial_handlers(void) {
+  for (bool managed : {false, true}) {
+    setUp();
+    StandaloneWifiConfig config;
+    config.ssid = "TestSSID";
+    config.manage_csi_lifecycle = managed;
+    StandaloneWifiService probe;
+    TEST_ASSERT_EQUAL(ESP_OK, probe.setup(config));
+    const int registrations = g_esp_event_mock.register_call_count;
+    probe.shutdown();
+    for (int failed_registration = 0; failed_registration <= registrations; ++failed_registration) {
+      setUp();
+      StandaloneWifiService service;
+      if (failed_registration < registrations) {
+        g_esp_event_mock.register_result_count = registrations;
+        for (int index = 0; index < registrations; ++index) {
+          g_esp_event_mock.register_results[index] = index == failed_registration ? ESP_FAIL : ESP_OK;
+        }
+      } else {
+        g_esp_wifi_mock.set_config_result_count = 1;
+        g_esp_wifi_mock.set_config_results[0] = ESP_FAIL;
+      }
+      TEST_ASSERT_EQUAL(ESP_FAIL, service.setup(config));
+      TEST_ASSERT_EQUAL(0, g_esp_wifi_mock.start_call_count);
+      for (const auto &slot : g_esp_event_mock.slots) TEST_ASSERT_FALSE(slot.active);
+      service.shutdown();
+    }
+  }
+}
+
+void test_standalone_wifi_service_shutdown_clears_pending_events_and_scan(void) {
+  for (bool managed : {false, true}) {
+    setUp();
+    StandaloneWifiService service;
+    StandaloneWifiConfig config;
+    config.ssid = "TestSSID";
+    config.manage_csi_lifecycle = managed;
+    int callbacks = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, service.setup(config, [&]() { callbacks++; }));
+    TEST_ASSERT_EQUAL(ESP_OK, service.start());
+    TEST_ASSERT_EQUAL(ESP_OK, service.request_scan(
+        [&](esp_err_t, const std::vector<StandaloneWifiAccessPoint> &) { callbacks++; }));
+    ip_event_got_ip_t got_ip{};
+    got_ip.ip_info.ip.addr = 0x3701A8C0U;
+    esp_event_mock_emit(IP_EVENT, IP_EVENT_STA_GOT_IP, &got_ip);
+    esp_event_mock_emit(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, nullptr);
+    g_esp_wifi_mock.stop_result = ESP_FAIL;
+    service.shutdown();
+    service.shutdown();
+    service.loop();
+    TEST_ASSERT_EQUAL(0, callbacks);
+    TEST_ASSERT_EQUAL(1, g_esp_wifi_mock.stop_call_count);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, service.request_scan({}));
+    StandaloneWifiInfo info;
+    service.get_info(&info);
+    TEST_ASSERT_FALSE(info.connected);
+    TEST_ASSERT_EQUAL_STRING("", info.ip_address);
+  }
+}
+
+void test_standalone_wifi_service_recovers_after_scan_failures(void) {
+  StandaloneWifiService service;
+  StandaloneWifiConfig config;
+  config.ssid = "TestSSID";
+  TEST_ASSERT_EQUAL(ESP_OK, service.setup(config));
+  TEST_ASSERT_EQUAL(ESP_OK, service.start());
+  g_esp_wifi_mock.scan_start_result = ESP_FAIL;
+  TEST_ASSERT_EQUAL(ESP_FAIL, service.request_scan({}));
+  g_esp_wifi_mock.scan_start_result = ESP_OK;
+  for (int failure = 0; failure < 4; ++failure) {
+    int callbacks = 0;
+    esp_err_t observed = ESP_OK;
+    g_esp_wifi_mock.scan_ap_count = failure == 2 ? 1U : 0U;
+    g_esp_wifi_mock.scan_get_ap_num_result = failure == 1 ? ESP_FAIL : ESP_OK;
+    g_esp_wifi_mock.scan_get_ap_records_result = failure == 2 ? ESP_FAIL : ESP_OK;
+    TEST_ASSERT_EQUAL(ESP_OK, service.request_scan(
+        [&](esp_err_t result, const std::vector<StandaloneWifiAccessPoint> &access_points) {
+          callbacks++;
+          observed = result;
+          TEST_ASSERT_TRUE(access_points.empty());
+        }));
+    wifi_event_sta_scan_done_t event{};
+    event.status = failure == 0 ? 1U : 0U;
+    esp_event_mock_emit(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, &event);
+    service.loop();
+    TEST_ASSERT_EQUAL(1, callbacks);
+    TEST_ASSERT_EQUAL(failure == 3 ? ESP_OK : ESP_FAIL, observed);
+    esp_event_mock_emit(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, &event);
+    service.loop();
+    TEST_ASSERT_EQUAL(1, callbacks);
+  }
+  service.shutdown();
+}
+
+void test_standalone_wifi_service_restarts_driver_when_disconnect_fails(void) {
+  StandaloneWifiService service;
+  StandaloneWifiConfig config;
+  config.ssid = "InitialSSID";
+  TEST_ASSERT_EQUAL(ESP_OK, service.setup(config));
+  TEST_ASSERT_EQUAL(ESP_OK, service.start());
+  ip_event_got_ip_t got_ip{};
+  got_ip.ip_info.ip.addr = 0x3701A8C0U;
+  esp_event_mock_emit(IP_EVENT, IP_EVENT_STA_GOT_IP, &got_ip);
+  service.loop();
+  g_esp_wifi_mock.disconnect_result_count = 1;
+  g_esp_wifi_mock.disconnect_results[0] = ESP_ERR_WIFI_CONN;
+  config.ssid = "ReplacementSSID";
+  TEST_ASSERT_EQUAL(ESP_OK, service.update_station_config(config));
+  TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, service.update_station_config(config));
+  TEST_ASSERT_EQUAL(1, g_esp_wifi_mock.stop_call_count);
+  esp_event_mock_emit(WIFI_EVENT, WIFI_EVENT_STA_STOP, nullptr);
+  service.loop();
+  TEST_ASSERT_FALSE(StandaloneWifiServiceTestAccess::station_reconfigure_pending(service));
+  TEST_ASSERT_EQUAL(1, g_esp_wifi_mock.deinit_call_count);
+  TEST_ASSERT_EQUAL(2, g_esp_wifi_mock.start_call_count);
+  TEST_ASSERT_EQUAL_STRING("ReplacementSSID", reinterpret_cast<const char *>(g_esp_wifi_mock.last_config.sta.ssid));
+  service.shutdown();
+}
+
 void test_standalone_wifi_service_apply_started_policy_and_reconnect_logic(void) {
   WiFiLifecycleManager lifecycle;
   g_esp_wifi_mock.bandwidth = WIFI_BW_HT40;
@@ -912,6 +1031,10 @@ int process(void) {
   RUN_TEST(test_standalone_wifi_service_leaves_csi_refresh_to_shared_runtime);
   RUN_TEST(test_standalone_wifi_service_update_station_config_rejects_invalid_bssid);
   RUN_TEST(test_standalone_wifi_service_reports_asynchronous_scan_snapshot);
+  RUN_TEST(test_standalone_wifi_service_shutdown_clears_pending_events_and_scan);
+  RUN_TEST(test_standalone_wifi_service_setup_failure_unregisters_partial_handlers);
+  RUN_TEST(test_standalone_wifi_service_recovers_after_scan_failures);
+  RUN_TEST(test_standalone_wifi_service_restarts_driver_when_disconnect_fails);
   RUN_TEST(test_standalone_wifi_service_apply_started_policy_and_reconnect_logic);
   return UNITY_END();
 }

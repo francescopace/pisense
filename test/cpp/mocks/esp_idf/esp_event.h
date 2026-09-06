@@ -156,7 +156,7 @@ esp_event_handler_instance_unregister(esp_event_base_t event_base,
                                       int32_t event_id,
                                       esp_event_handler_instance_t instance) {
   g_esp_event_mock.unregister_call_count++;
-  for (int i = 0; i < 4; i++) {
+  for (size_t i = 0; i < sizeof(g_esp_event_mock.slots) / sizeof(g_esp_event_mock.slots[0]); i++) {
     esp_event_mock_slot_t *slot = &g_esp_event_mock.slots[i];
     if (!slot->active || slot->instance != instance) {
       continue;

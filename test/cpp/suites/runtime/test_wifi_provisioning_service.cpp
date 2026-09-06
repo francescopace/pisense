@@ -164,6 +164,108 @@ void setUp(void) {
 
 void tearDown(void) {}
 
+void test_wifi_provisioning_rejects_invalid_candidates_without_persistence(void) {
+  StandaloneWifiService manager;
+  WifiProvisioningService service(&manager);
+  TEST_ASSERT_EQUAL(ESP_OK, service.setup_station(make_defaults()));
+  const std::string original_ssid = service.config().ssid;
+  std::string message;
+  for (const std::string &command : {
+      std::string("SET_WIFI_BSSID:bssid"),
+      std::string("SET_WIFI_BSSID:force=true"),
+      std::string("SET_WIFI_BSSID:bssid=&bssid="),
+      std::string("SET_WIFI_BSSID:bssid=&force=invalid"),
+      std::string("SET_WIFI_BSSID:bssid=aa-bb-cc-dd-ee-ff"),
+      std::string("SET_WIFI_BSSID:bssid=gg:bb:cc:dd:ee:ff")}) {
+    TEST_ASSERT_FALSE(service.handle_command(command, &message));
+    TEST_ASSERT_FALSE(service.apply_pending());
+    TEST_ASSERT_EQUAL_STRING(original_ssid.c_str(), service.config().ssid.c_str());
+  }
+  for (const auto &credentials : {
+      std::make_pair(std::string(), std::string()),
+      std::make_pair(std::string(33, 's'), std::string()),
+      std::make_pair(std::string("ValidSSID"), std::string(64, 'p'))}) {
+    TEST_ASSERT_FALSE(service.begin_serial_provisioning(credentials.first, credentials.second, &message));
+    TEST_ASSERT_FALSE(service.apply_pending());
+  }
+  nvs_mock_set_open_result(ESP_FAIL);
+  TEST_ASSERT_FALSE(service.begin_serial_provisioning("ValidSSID", "password", &message));
+  TEST_ASSERT_FALSE(service.apply_pending());
+  TEST_ASSERT_EQUAL_STRING(original_ssid.c_str(), service.config().ssid.c_str());
+  manager.shutdown();
+}
+
+void test_wifi_provisioning_scan_failure_resumes_runtime_and_permits_retry(void) {
+  StandaloneWifiService manager;
+  WifiProvisioningService service(&manager);
+  TEST_ASSERT_EQUAL(ESP_OK, service.setup_station(make_defaults()));
+  TEST_ASSERT_EQUAL(ESP_OK, manager.start());
+  int prepared = 0;
+  int resumed = 0;
+  int changes = 0;
+  service.set_scan_callbacks([&]() { prepared++; }, [&]() { resumed++; });
+  service.set_change_callback([&]() { changes++; });
+  std::string message;
+  g_esp_wifi_mock.scan_start_result = ESP_FAIL;
+  TEST_ASSERT_FALSE(service.request_access_point_scan(&message));
+  TEST_ASSERT_FALSE(service.scan_pending());
+  TEST_ASSERT_EQUAL(1, prepared);
+  TEST_ASSERT_EQUAL(1, resumed);
+  g_esp_wifi_mock.scan_start_result = ESP_OK;
+  TEST_ASSERT_TRUE(service.request_access_point_scan(&message));
+  TEST_ASSERT_FALSE(service.request_access_point_scan(&message));
+  TEST_ASSERT_FALSE(service.handle_command("SET_WIFI_BSSID:bssid=", &message));
+  wifi_event_sta_scan_done_t event{};
+  event.status = 1U;
+  esp_event_mock_emit(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, &event);
+  manager.loop();
+  TEST_ASSERT_FALSE(service.scan_pending());
+  TEST_ASSERT_TRUE(service.access_points().empty());
+  TEST_ASSERT_EQUAL(2, prepared);
+  TEST_ASSERT_EQUAL(2, resumed);
+  TEST_ASSERT_EQUAL(4, changes);
+  manager.shutdown();
+}
+
+void test_wifi_provisioning_missing_manager_or_credentials_block_radio_operations(void) {
+  WifiProvisioningService absent(nullptr);
+  std::string message;
+  TEST_ASSERT_FALSE(absent.request_access_point_scan(&message));
+  TEST_ASSERT_FALSE(absent.apply_live(&message));
+  TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, absent.setup_station(make_defaults()));
+  StandaloneWifiService manager;
+  WifiProvisioningService service(&manager);
+  TEST_ASSERT_EQUAL(ESP_OK, service.setup_station(WifiProvisioningDefaults{}));
+  TEST_ASSERT_FALSE(service.request_access_point_scan(&message));
+  TEST_ASSERT_FALSE(service.handle_command("SET_WIFI_BSSID:bssid=aa:bb:cc:dd:ee:ff", &message));
+  TEST_ASSERT_EQUAL(0, g_esp_wifi_mock.connect_call_count);
+  manager.shutdown();
+}
+
+void test_wifi_provisioning_failed_verification_and_rollback_require_recovery(void) {
+  StandaloneWifiService manager;
+  WifiProvisioningService service(&manager);
+  auto defaults = make_defaults();
+  defaults.candidate_timeout_ms = 1000U;
+  TEST_ASSERT_EQUAL(ESP_OK, service.setup_station(defaults));
+  std::string message;
+  TEST_ASSERT_TRUE(service.begin_serial_provisioning("Candidate", "password", &message));
+  TEST_ASSERT_FALSE(service.begin_serial_provisioning("Second", "password", &message));
+  TEST_ASSERT_FALSE(service.handle_command("CLEAR_WIFI", &message));
+  service.loop();
+  service.loop();
+  TEST_ASSERT_TRUE(service.apply_state() == WifiProvisioningApplyState::VERIFYING);
+  esp_timer_mock::advance(defaults.candidate_timeout_ms * 1000);
+  service.loop();
+  TEST_ASSERT_TRUE(service.apply_state() == WifiProvisioningApplyState::ROLLING_BACK);
+  esp_timer_mock::advance(defaults.candidate_timeout_ms * 1000);
+  service.loop();
+  TEST_ASSERT_TRUE(service.apply_state() == WifiProvisioningApplyState::RECOVERY_REQUIRED);
+  TEST_ASSERT_FALSE(service.apply_pending());
+  TEST_ASSERT_EQUAL_STRING(defaults.ssid, service.config().ssid.c_str());
+  manager.shutdown();
+}
+
 void test_wifi_provisioning_loads_defaults_when_no_saved_config(void) {
   WifiProvisioningService service(nullptr);
 
@@ -740,6 +842,10 @@ void test_wifi_provisioning_requires_recovery_when_rollback_journal_cannot_clear
 
 int process(void) {
   UNITY_BEGIN();
+  RUN_TEST(test_wifi_provisioning_rejects_invalid_candidates_without_persistence);
+  RUN_TEST(test_wifi_provisioning_scan_failure_resumes_runtime_and_permits_retry);
+  RUN_TEST(test_wifi_provisioning_missing_manager_or_credentials_block_radio_operations);
+  RUN_TEST(test_wifi_provisioning_failed_verification_and_rollback_require_recovery);
   RUN_TEST(test_wifi_provisioning_loads_defaults_when_no_saved_config);
   RUN_TEST(test_wifi_provisioning_loads_saved_config);
   RUN_TEST(test_wifi_provisioning_normalizes_an_incompatible_stored_channel);

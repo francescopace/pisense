@@ -79,8 +79,11 @@ ctest --test-dir test/cpp/build --output-on-failure
 # Python tests (device runtime, CLI, tools, and validation)
 .venv/bin/pytest test/python -v
 
-# With coverage (run from repo root)
-.venv/bin/pytest test/python -v --cov=src/python/micro_espectre --cov-report=term-missing
+# Python tests with coverage
+./test/python/run_coverage.sh
+
+# Web tests with coverage
+./test/web/run_coverage.sh
 
 # Static website preview
 python -m http.server 8080 --directory docs/web
