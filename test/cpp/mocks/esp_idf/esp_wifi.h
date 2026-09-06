@@ -101,6 +101,10 @@ typedef struct {
   uint8_t reason;
 } wifi_event_sta_disconnected_t;
 
+#ifndef WIFI_REASON_ROAMING
+#define WIFI_REASON_ROAMING 207
+#endif
+
 #ifndef WIFI_REASON_BEACON_TIMEOUT
 #define WIFI_REASON_BEACON_TIMEOUT 200
 #endif

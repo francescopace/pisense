@@ -492,6 +492,14 @@ esp_err_t WiFiLifecycleManager::register_handlers(wifi_connected_callback_t conn
     return err;
   }
 
+  err = esp_event_handler_instance_register(
+      WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, &WiFiLifecycleManager::wifi_event_handler_,
+      this, &associated_instance_);
+  if (err != ESP_OK) {
+    unregister_handlers();
+    return err;
+  }
+
   // Registration may happen after the product has already joined Wi-Fi. In
   // that case GOT_IP is historical and no event will wake the runtime. Apply
   // a missed STA-start policy before restoring that state: changing protocol
@@ -554,6 +562,10 @@ esp_err_t WiFiLifecycleManager::register_handlers(wifi_connected_callback_t conn
 
 void WiFiLifecycleManager::unregister_handlers() {
   cancel_csi_receive_path_refresh();
+  if (associated_instance_) {
+    esp_event_handler_instance_unregister(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, associated_instance_);
+    associated_instance_ = nullptr;
+  }
   if (started_instance_) {
     esp_event_handler_instance_unregister(WIFI_EVENT, WIFI_EVENT_STA_START, started_instance_);
     started_instance_ = nullptr;
@@ -576,6 +588,7 @@ void WiFiLifecycleManager::unregister_handlers() {
   started_policy_driver_generation_.store(
       wifi_driver_generation.load(std::memory_order_acquire), std::memory_order_relaxed);
   ready_ = false;
+  roaming_ = false;
   active_ip_info_ = {};
   ESPECTRE_LOGI(WIFI_LIFECYCLE_TAG, "Wi-Fi event handlers unregistered");
 }
@@ -600,12 +613,33 @@ esp_err_t WiFiLifecycleManager::process_pending_events() {
       continue;
     }
     if (event.type == PendingWifiEventType::DISCONNECTED) {
+      roaming_ = event.roaming && (ready_ || roaming_);
       ready_ = false;
       active_ip_info_ = {};
       if (disconnected_callback_) {
         disconnected_callback_();
       }
       continue;
+    }
+
+    if (event.type == PendingWifiEventType::ASSOCIATED) {
+      // Initial association and ordinary reconnects must wait for GOT_IP.
+      // Roaming can retain the IP stack and omit that event altogether.
+      if (!ready_ && !roaming_) {
+        continue;
+      }
+      if (ready_ && disconnected_callback_) {
+        disconnected_callback_();
+      }
+      ready_ = false;
+      roaming_ = false;
+      active_ip_info_ = {};
+      esp_netif_t *station = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+      wifi_ap_record_t ap{};
+      if (station == nullptr || esp_netif_get_ip_info(station, &event.ip_info) != ESP_OK ||
+          event.ip_info.ip.addr == 0U || esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
+        continue;
+      }
     }
 
     const bool duplicate = ready_ &&
@@ -625,6 +659,7 @@ esp_err_t WiFiLifecycleManager::process_pending_events() {
       connected_callback_(event.ip_info);
     }
     active_ip_info_ = event.ip_info;
+    roaming_ = false;
   }
   return ESP_OK;
 }
@@ -756,9 +791,16 @@ void WiFiLifecycleManager::wifi_event_handler_(void* arg, esp_event_base_t event
             current_driver_generation, std::memory_order_relaxed);
       }
     }
-  } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
+  } else if (event_id == WIFI_EVENT_STA_CONNECTED) {
     if (!manager->pending_events_.post_overwrite_oldest(
-            PendingWifiEvent{PendingWifiEventType::DISCONNECTED, {}})) {
+            PendingWifiEvent{PendingWifiEventType::ASSOCIATED, {}})) {
+      ESPECTRE_LOGW(WIFI_LIFECYCLE_TAG, "Wi-Fi event queue overflowed; oldest transition discarded");
+    }
+  } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
+    const auto *event = static_cast<const wifi_event_sta_disconnected_t *>(event_data);
+    PendingWifiEvent pending{PendingWifiEventType::DISCONNECTED, {}};
+    pending.roaming = event != nullptr && event->reason == WIFI_REASON_ROAMING;
+    if (!manager->pending_events_.post_overwrite_oldest(pending)) {
       ESPECTRE_LOGW(WIFI_LIFECYCLE_TAG, "Wi-Fi event queue overflowed; oldest transition discarded");
     }
   } else if (event_id == WIFI_EVENT_SCAN_DONE) {

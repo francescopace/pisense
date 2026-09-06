@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changes
 
+- The shared C++ Wi-Fi lifecycle handles reassociation and roaming with retained IPv4 state without requiring a new `GOT_IP` event. It restarts CSI and traffic through the existing callbacks.
 - ESPHome embeds `esphome.project.version`, or a numeric component source ref, into the ESP-IDF application version; otherwise, it keeps ESPHome's default. ESPHome, Native, and Matter share the same runtime firmware version helper.
 - Micro-ESPectre Direct validates JSON and registered route parameters before reading snapshots or queuing recalibration. Invalid bodies and unexpected fields fail with HTTP 400, and non-empty bodies require the JSON media type.
 - Command parameter validation uses one registered callback path for SDK and frontend routes before dispatch. Invalid threshold and motion hit ranges fail during parsing; ESPHome entity controls use the same validators. Command executors now require successfully parsed input, while direct runtime APIs keep their argument checks.

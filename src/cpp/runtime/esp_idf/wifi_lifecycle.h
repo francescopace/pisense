@@ -43,8 +43,8 @@ class WiFiLifecycleManager {
   /**
    * Register WiFi event handlers
    * 
-   * @param connected_cb Callback when WiFi obtains an IPv4 configuration;
-   *        receives the address, netmask, and gateway from GOT_IP
+   * @param connected_cb Callback when WiFi obtains or retains an IPv4 configuration;
+   *        receives the address, netmask, and gateway after GOT_IP or reassociation
    * @param disconnected_cb Callback when WiFi disconnects
    * @return ESP_OK on success. If the default station already has an IPv4
    *         address, its current state is queued for process_pending_events().
@@ -113,12 +113,14 @@ class WiFiLifecycleManager {
   // Event handler instances
   esp_event_handler_instance_t connected_instance_{nullptr};
   esp_event_handler_instance_t disconnected_instance_{nullptr};
+  esp_event_handler_instance_t associated_instance_{nullptr};
   esp_event_handler_instance_t started_instance_{nullptr};
   esp_event_handler_instance_t scan_done_instance_{nullptr};
 
   enum class PendingWifiEventType : uint8_t {
     CONNECTED,
     DISCONNECTED,
+    ASSOCIATED,
     CSI_RX_REFRESHED,
   };
 
@@ -127,6 +129,7 @@ class WiFiLifecycleManager {
     esp_netif_ip_info_t ip_info{};
     esp_err_t result{ESP_OK};
     uint32_t refresh_generation{0U};
+    bool roaming{false};
   };
 
   // Wi-Fi transitions are infrequent; this absorbs a short event-loop burst
@@ -144,6 +147,7 @@ class WiFiLifecycleManager {
   std::atomic<bool> started_policy_attempted_{false};
   WifiBandPolicy band_policy_{WifiBandPolicy::BAND_2G};
   bool ready_{false};
+  bool roaming_{false};
   esp_netif_ip_info_t active_ip_info_{};
 };
 

@@ -173,7 +173,7 @@ void test_wifi_lifecycle_register_handlers_dispatches_and_unregisters(void) {
                                           disconnected_calls++;
                                           callback_order += "disconnected";
                                         }));
-  TEST_ASSERT_EQUAL(3, g_esp_event_mock.register_call_count);
+  TEST_ASSERT_EQUAL(4, g_esp_event_mock.register_call_count);
 
   ip_event_got_ip_t event{};
   event.ip_info.ip.addr = 0x0101A8C0U;
@@ -193,7 +193,7 @@ void test_wifi_lifecycle_register_handlers_dispatches_and_unregisters(void) {
   TEST_ASSERT_EQUAL(event.ip_info.gw.addr, observed_ip_info.gw.addr);
 
   manager.unregister_handlers();
-  TEST_ASSERT_EQUAL(3, g_esp_event_mock.unregister_call_count);
+  TEST_ASSERT_EQUAL(4, g_esp_event_mock.unregister_call_count);
 
   esp_event_mock_emit(IP_EVENT, IP_EVENT_STA_GOT_IP, &event);
   esp_event_mock_emit(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, nullptr);
@@ -201,6 +201,83 @@ void test_wifi_lifecycle_register_handlers_dispatches_and_unregisters(void) {
   manager.process_pending_events();
   TEST_ASSERT_EQUAL(1, connected_calls);
   TEST_ASSERT_EQUAL(1, disconnected_calls);
+}
+
+void test_wifi_lifecycle_reassociation_reuses_connection_callbacks_without_got_ip(void) {
+  WiFiLifecycleManager manager;
+  std::string transitions;
+  esp_netif_ip_info_t observed{};
+  TEST_ASSERT_EQUAL(ESP_OK, manager.register_handlers(
+      [&](const esp_netif_ip_info_t &ip) { transitions += "C"; observed = ip; },
+      [&]() { transitions += "D"; }));
+  esp_event_mock_emit(WIFI_EVENT, WIFI_EVENT_STA_START, nullptr);
+
+  // An initial association must not restore an old cached address.
+  g_esp_netif_mock.ip_addr = 0x3701A8C0U;
+  g_esp_netif_mock.gw_addr = 0x0101A8C0U;
+  esp_event_mock_emit(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, nullptr);
+  TEST_ASSERT_EQUAL(ESP_OK, manager.process_pending_events());
+  TEST_ASSERT_TRUE(transitions.empty());
+  ip_event_got_ip_t ip{};
+  ip.ip_info.ip.addr = g_esp_netif_mock.ip_addr;
+  ip.ip_info.gw.addr = g_esp_netif_mock.gw_addr;
+  ip.ip_info.netmask.addr = g_esp_netif_mock.netmask_addr;
+  esp_event_mock_emit(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+  TEST_ASSERT_EQUAL(ESP_OK, manager.process_pending_events());
+  TEST_ASSERT_EQUAL_STRING("C", transitions.c_str());
+
+  // A new association restarts the session even on the same channel and IP.
+  ++g_esp_wifi_mock.current_ap_info.bssid[5];
+  esp_event_mock_emit(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, nullptr);
+  TEST_ASSERT_EQUAL_STRING("C", transitions.c_str());
+  TEST_ASSERT_EQUAL(ESP_OK, manager.process_pending_events());
+  TEST_ASSERT_EQUAL_STRING("CDC", transitions.c_str());
+  TEST_ASSERT_EQUAL(ip.ip_info.ip.addr, observed.ip.addr);
+  TEST_ASSERT_EQUAL(ip.ip_info.gw.addr, observed.gw.addr);
+
+  // Roaming can report a disconnect but retain the IP stack across association.
+  wifi_event_sta_disconnected_t disconnect{};
+  disconnect.reason = WIFI_REASON_ROAMING;
+  esp_event_mock_emit(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnect);
+  TEST_ASSERT_EQUAL(ESP_OK, manager.process_pending_events());
+  TEST_ASSERT_EQUAL_STRING("CDCD", transitions.c_str());
+  ++g_esp_wifi_mock.current_ap_info.bssid[5];
+  esp_event_mock_emit(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, nullptr);
+  TEST_ASSERT_EQUAL(ESP_OK, manager.process_pending_events());
+  TEST_ASSERT_EQUAL_STRING("CDCDC", transitions.c_str());
+
+  // A later GOT_IP with unchanged addressing must not start services twice.
+  esp_event_mock_emit(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+  TEST_ASSERT_EQUAL(ESP_OK, manager.process_pending_events());
+  TEST_ASSERT_EQUAL_STRING("CDCDC", transitions.c_str());
+  manager.unregister_handlers();
+}
+
+void test_wifi_lifecycle_reconnect_waits_for_valid_ip(void) {
+  for (const uint8_t reason : {uint8_t(WIFI_REASON_ROAMING), uint8_t(WIFI_REASON_BEACON_TIMEOUT)}) {
+    WiFiLifecycleManager manager;
+    int connections = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, manager.register_handlers(
+        [&](const esp_netif_ip_info_t &) { ++connections; }, []() {}));
+    esp_event_mock_emit(WIFI_EVENT, WIFI_EVENT_STA_START, nullptr);
+    ip_event_got_ip_t ip{};
+    ip.ip_info.ip.addr = 0x3701A8C0U;
+    esp_event_mock_emit(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+    TEST_ASSERT_EQUAL(ESP_OK, manager.process_pending_events());
+    wifi_event_sta_disconnected_t disconnect{};
+    disconnect.reason = reason;
+    // Ordinary reconnects ignore cached IP; roaming waits if IP was lost.
+    g_esp_netif_mock.ip_addr = reason == WIFI_REASON_ROAMING ? 0U : ip.ip_info.ip.addr;
+    esp_event_mock_emit(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnect);
+    esp_event_mock_emit(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, nullptr);
+    TEST_ASSERT_EQUAL(ESP_OK, manager.process_pending_events());
+    TEST_ASSERT_EQUAL(1, connections);
+    esp_event_mock_emit(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+    TEST_ASSERT_EQUAL(ESP_OK, manager.process_pending_events());
+    TEST_ASSERT_EQUAL(2, connections);
+    manager.unregister_handlers();
+    g_esp_netif_mock.ip_addr = 0U;
+  }
 }
 
 void test_wifi_lifecycle_refreshes_csi_receive_path_without_promiscuous_mode(void) {
@@ -386,7 +463,7 @@ void test_wifi_lifecycle_propagates_fatal_late_policy_failure(void) {
   TEST_ASSERT_EQUAL(1, g_esp_wifi_mock.set_protocol_call_count);
   TEST_ASSERT_EQUAL(0, g_esp_wifi_mock.disconnect_call_count);
   TEST_ASSERT_EQUAL(0, g_esp_wifi_mock.connect_call_count);
-  TEST_ASSERT_EQUAL(3, g_esp_event_mock.unregister_call_count);
+  TEST_ASSERT_EQUAL(4, g_esp_event_mock.unregister_call_count);
 }
 
 void test_wifi_lifecycle_propagates_late_station_restart_failure(void) {
@@ -402,7 +479,7 @@ void test_wifi_lifecycle_propagates_late_station_restart_failure(void) {
       ESP_FAIL, manager.register_handlers([](const esp_netif_ip_info_t &) {}, []() {}));
   TEST_ASSERT_EQUAL(1, g_esp_wifi_mock.disconnect_call_count);
   TEST_ASSERT_EQUAL(1, g_esp_wifi_mock.connect_call_count);
-  TEST_ASSERT_EQUAL(3, g_esp_event_mock.unregister_call_count);
+  TEST_ASSERT_EQUAL(4, g_esp_event_mock.unregister_call_count);
 }
 
 void test_wifi_lifecycle_does_not_restore_stale_ip_while_station_reconnects(void) {
@@ -977,6 +1054,7 @@ void test_standalone_wifi_service_apply_started_policy_and_reconnect_logic(void)
   TEST_ASSERT_EQUAL(ESP_FAIL, failing_lifecycle.process_pending_events());
 
   failing_lifecycle.unregister_handlers();
+  esp_event_mock_reset();
   esp_wifi_mock_reset();
   StandaloneWifiService service;
   StandaloneWifiConfig config;
@@ -1006,6 +1084,8 @@ int process(void) {
   RUN_TEST(test_wifi_lifecycle_does_not_retry_a_policy_that_actually_failed);
   RUN_TEST(test_wifi_lifecycle_started_policy_skips_matching_radio_settings);
   RUN_TEST(test_wifi_lifecycle_register_handlers_dispatches_and_unregisters);
+  RUN_TEST(test_wifi_lifecycle_reassociation_reuses_connection_callbacks_without_got_ip);
+  RUN_TEST(test_wifi_lifecycle_reconnect_waits_for_valid_ip);
   RUN_TEST(test_wifi_lifecycle_refreshes_csi_receive_path_without_promiscuous_mode);
   RUN_TEST(test_wifi_lifecycle_csi_receive_refresh_requires_promiscuous_disabled);
   RUN_TEST(test_wifi_lifecycle_cancel_invalidates_pending_csi_refresh_completion);
