@@ -606,14 +606,14 @@ void test_ota_channel_helpers(void) {
   TEST_ASSERT_FALSE(espectre_ota_channel_accepted(""));
   TEST_ASSERT_FALSE(espectre_ota_channel_accepted("latest"));
   TEST_ASSERT_EQUAL_STRING(
-      "https://github.com/francescopace/espectre/releases/latest/download/espectre-native-ota-esp32c3.json",
+      "https://github.com/francescopace/espectre/releases/latest/download/firmware-manifest-release.json",
       espectre_ota_manifest_url("native", "esp32c3", "release").c_str());
   const std::string preview_url =
       std::string("https://github.com/francescopace/espectre/releases/download/") +
-      ESPECTRE_OTA_RELEASE_TAG_PREVIEW + "/espectre-native-ota-esp32c6.json";
+      ESPECTRE_OTA_RELEASE_TAG_PREVIEW + "/firmware-manifest-preview.json";
   const std::string develop_url =
       std::string("https://github.com/francescopace/espectre/releases/download/") +
-      ESPECTRE_OTA_RELEASE_TAG_DEVELOP + "/espectre-native-ota-esp32s3.json";
+      ESPECTRE_OTA_RELEASE_TAG_DEVELOP + "/firmware-manifest-develop.json";
   TEST_ASSERT_EQUAL_STRING(preview_url.c_str(),
                            espectre_ota_manifest_url("native", "esp32c6", "preview").c_str());
   TEST_ASSERT_EQUAL_STRING(develop_url.c_str(),

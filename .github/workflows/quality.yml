@@ -65,6 +65,9 @@ jobs:
         run: npm --prefix .github/quality ci --ignore-scripts
       - name: Run ESLint
         continue-on-error: true
+        env:
+          # GitHub code scanning does not honor SARIF in-source suppressions.
+          SARIF_ESLINT_IGNORE_SUPPRESSED: 'true'
         run: |
           mkdir -p .cache/reports/quality
           .github/quality/node_modules/.bin/eslint --config .github/quality/eslint.config.mjs docs/web/assets/js docs/web/*.mjs docs/web/headless-entry.js .github/quality/*.mjs --format ./.github/quality/node_modules/@microsoft/eslint-formatter-sarif/sarif.js --output-file .cache/reports/quality/eslint.sarif

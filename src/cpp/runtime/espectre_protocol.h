@@ -542,11 +542,13 @@ bool parse_espectre_command_request(const std::string &command_id,
  */
 bool espectre_ota_channel_accepted(const std::string &channel);
 /**
- * Built-in GitHub Releases manifest URL for a frontend, chip, and channel.
+ * Built-in GitHub Releases firmware catalog URL for the selected channel.
  *
  * `release` uses `/releases/latest/download/`. `preview` uses tag
  * `ESPECTRE_OTA_RELEASE_TAG_PREVIEW` (`snapshot`). `develop` uses tag
  * `ESPECTRE_OTA_RELEASE_TAG_DEVELOP` (`snapshot-dev`).
+ * Each channel publishes `firmware-manifest-<channel>.json`; the OTA service
+ * selects the frontend and chip from that catalog.
  *
  * @return Empty when `frontend`, `chip`, or `channel` is not a published value.
  */

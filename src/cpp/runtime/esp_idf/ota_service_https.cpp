@@ -28,7 +28,7 @@ namespace espectre {
 namespace {
 
 static const char *const TAG = "espectre.ota";
-constexpr size_t kMaxManifestBytes = 4096U;
+constexpr size_t kMaxManifestBytes = 64U * 1024U;
 constexpr uint32_t kHttpTimeoutMs = 30000U;
 constexpr uint32_t kPostSuccessDelayMs = 500U;
 constexpr uint32_t kWorkerStackSize = 8192U;
@@ -246,7 +246,8 @@ void HttpsOtaService::run_worker_(const WorkerRequest &request) {
 
   std::string body;
   std::string error;
-  if (!fetch_https_text_(manifest_url, &body, &error) || !parse_manifest_(body, &manifest, &error)) {
+  if (!fetch_https_text_(manifest_url, &body, &error) ||
+      !parse_manifest_(std::move(body), channel, &manifest, &error)) {
     set_error_status_(error.empty() ? "manifest fetch failed" : error, current_version, "", manifest_url, "",
                       channel);
     return;
@@ -511,21 +512,76 @@ bool HttpsOtaService::fetch_https_text_(const std::string &url, std::string *bod
   return true;
 }
 
-bool HttpsOtaService::parse_manifest_(const std::string &body, ManifestInfo *manifest, std::string *error) const {
+bool HttpsOtaService::parse_manifest_(std::string body, const std::string &channel,
+                                     ManifestInfo *manifest, std::string *error) const {
   if (manifest == nullptr) {
     return false;
   }
-  manifest->version = extract_json_string(body, "version");
-  manifest->image_url = extract_json_string(body, "image_url");
-  if (manifest->image_url.empty()) {
-    manifest->image_url = extract_json_string(body, "url");
-  }
-  if (manifest->version.empty() || manifest->image_url.empty()) {
+  *manifest = {};
+  const auto fail = [error](const char *message) {
     if (error != nullptr) {
-      *error = "invalid manifest";
+      *error = message;
     }
     return false;
+  };
+  std::vector<JsonObjectField> fields;
+  if (!parse_json_object_fields(body, &fields, error)) {
+    return false;
   }
+  const auto *schema = find_json_object_field(fields, "schema_version");
+  const auto *published_channel = find_json_object_field(fields, "channel");
+  const auto *version = find_json_object_field(fields, "version");
+  if (schema == nullptr || schema->type != JsonValueType::NUMBER || schema->value != "1" ||
+      published_channel == nullptr || published_channel->type != JsonValueType::STRING ||
+      published_channel->value != channel || version == nullptr ||
+      version->type != JsonValueType::STRING || version->value.empty()) {
+    return fail("invalid manifest metadata");
+  }
+  const std::string target_version = version->value;
+  // Retain only the selected subtree at each level, releasing the full catalog.
+  const auto take_field = [&fields, &body](const char *name, JsonValueType type) {
+    for (auto &field : fields) {
+      if (field.name == name && field.type == type) {
+        body = std::move(field.value);
+        fields.clear();
+        return true;
+      }
+    }
+    return false;
+  };
+  if (!take_field("frontends", JsonValueType::OBJECT) ||
+      !parse_json_object_fields(body, &fields, error) ||
+      !take_field(frontend_.c_str(), JsonValueType::OBJECT) ||
+      !parse_json_object_fields(body, &fields, error) ||
+      !take_field("artifacts", JsonValueType::ARRAY)) {
+    return fail("missing frontend artifacts");
+  }
+  std::vector<std::vector<JsonObjectField>> artifacts;
+  if (!parse_json_array_objects(body, &artifacts, error)) {
+    return false;
+  }
+  std::string image_url;
+  for (const auto &artifact : artifacts) {
+    const auto *chip = find_json_object_field(artifact, "chip");
+    const auto *build_type = find_json_object_field(artifact, "build_type");
+    if (chip == nullptr || chip->type != JsonValueType::STRING || chip->value != chip_ ||
+        build_type == nullptr || build_type->type != JsonValueType::STRING || build_type->value != "ota") {
+      continue;
+    }
+    const auto *url = find_json_object_field(artifact, "url");
+    if (url == nullptr || url->type != JsonValueType::STRING || url->value.compare(0, 8, "https://") != 0) {
+      return fail("invalid ota image url");
+    }
+    if (!image_url.empty()) {
+      return fail("ambiguous ota image");
+    }
+    image_url = url->value;
+  }
+  if (image_url.empty()) {
+    return fail("missing ota image for chip");
+  }
+  manifest->version = target_version;
+  manifest->image_url = std::move(image_url);
   return true;
 }
 

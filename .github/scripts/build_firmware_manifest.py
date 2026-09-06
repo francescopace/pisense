@@ -63,9 +63,10 @@ def parse_args() -> argparse.Namespace:
         "--compliance-url-prefix",
         help="Optional URL prefix used for compliance artifacts independently of firmware images",
     )
+    # Snapshot can run the workflow from main with a newer builder from develop.
     parser.add_argument(
         "--native-ota-manifest-dir",
-        help="Optional directory where per-chip native OTA manifests are written",
+        help="Deprecated and ignored; Native OTA images use the shared firmware manifest",
     )
     parser.add_argument(
         "--require-complete-matrix",
@@ -285,31 +286,9 @@ def build_manifest(args: argparse.Namespace) -> dict:
     return manifest
 
 
-def build_native_ota_manifests(manifest: dict, output_dir: Path) -> list[Path]:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    paths = []
-    for artifact in manifest["frontends"]["native"]["artifacts"]:
-        if artifact["build_type"] != "ota":
-            continue
-        payload = {
-            "schema_version": 1,
-            "frontend": "native",
-            "chip": artifact["chip"],
-            "version": manifest["version"],
-            "release_tag": manifest["release_tag"],
-            "image_url": artifact["url"],
-        }
-        path = output_dir / f"espectre-native-ota-{artifact['chip']}.json"
-        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        paths.append(path)
-    return paths
-
-
 def main() -> int:
     args = parse_args()
-    manifest = build_manifest(args)
-    if args.native_ota_manifest_dir:
-        build_native_ota_manifests(manifest, Path(args.native_ota_manifest_dir))
+    build_manifest(args)
     return 0
 
 

@@ -547,13 +547,12 @@ jobs:
         run: |
           python .github/scripts/build_firmware_manifest.py \
             --firmware-dir firmware \
-            --output "firmware/firmware-manifest-${GITHUB_REF_NAME}.json" \
+            --output firmware/firmware-manifest-release.json \
             --channel release \
             --version "${GITHUB_REF_NAME}" \
             --release-tag "${GITHUB_REF_NAME}" \
             --commit "${GITHUB_SHA}" \
             --compliance-url-prefix "https://espectre.dev/artifacts/firmware/release" \
-            --native-ota-manifest-dir firmware \
             --require-complete-matrix
 
       - name: Build firmware compliance bundle
@@ -621,7 +620,6 @@ jobs:
           body_path: release_notes.md
           files: |
             firmware/*.bin
-            firmware/espectre-native-ota-*.json
             firmware/firmware-compliance-*.zip
             firmware/firmware-manifest-*.json
             sdk/*.tar.gz
@@ -650,13 +648,19 @@ jobs:
               per_page: 100
             });
             const legacyNames = new Set(['LICENSE', 'LICENSING.md', 'THIRD_PARTY_NOTICES.md']);
+            const uploadedNames = new Set(assets.map(asset => asset.name));
+            if (uploadedNames.has('firmware-manifest-release.json')) {
+              legacyNames.add(`firmware-manifest-${context.ref.replace('refs/tags/', '')}.json`);
+            }
             const legacySuffixes = [
               '-sbom.spdx.json',
               '-THIRD_PARTY_NOTICES.txt',
               '-third-party-licenses.zip'
             ];
             for (const asset of assets) {
-              if (!legacyNames.has(asset.name) && !legacySuffixes.some(suffix => asset.name.endsWith(suffix))) {
+              const supersededOtaManifest = uploadedNames.has('firmware-manifest-release.json') &&
+                /^espectre-native-ota-esp32(?:c3|c5|c6|s2|s3)?\.json$/.test(asset.name);
+              if (!supersededOtaManifest && !legacyNames.has(asset.name) && !legacySuffixes.some(suffix => asset.name.endsWith(suffix))) {
                 continue;
               }
               await github.rest.repos.deleteReleaseAsset({

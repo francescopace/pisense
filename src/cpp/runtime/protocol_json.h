@@ -46,6 +46,10 @@ bool parse_urlencoded_key_value_pairs(const std::string &payload,
 bool parse_json_object_fields(const std::string &payload,
                               std::vector<JsonObjectField> *fields,
                               std::string *error = nullptr);
+/** Parse a complete array of objects, rejecting invalid or non-object entries. */
+bool parse_json_array_objects(const std::string &payload,
+                              std::vector<std::vector<JsonObjectField>> *objects,
+                              std::string *error = nullptr);
 const JsonObjectField *find_json_object_field(const std::vector<JsonObjectField> &fields, const char *name);
 
 }  // namespace espectre

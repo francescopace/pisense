@@ -1248,10 +1248,8 @@ std::string espectre_ota_manifest_url(const char *frontend, const char *chip, co
                                                      : ESPECTRE_OTA_RELEASE_TAG_DEVELOP;
     url += "/";
   }
-  url += "espectre-";
-  url += frontend;
-  url += "-ota-";
-  url += chip;
+  url += "firmware-manifest-";
+  url += channel;
   url += ".json";
   return url;
 }

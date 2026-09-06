@@ -38,6 +38,20 @@ class JsonReader {
     return true;
   }
 
+  bool parse_array_objects(std::vector<std::vector<JsonObjectField>> *objects, std::string *error) {
+    error_ = error;
+    if (objects == nullptr) {
+      return fail_("objects output is required");
+    }
+    objects->clear();
+    skip_space_();
+    if (!parse_array_(0U, objects)) {
+      return false;
+    }
+    skip_space_();
+    return position_ == input_.size() || fail_("unexpected data after JSON array");
+  }
+
  private:
   static bool hex_value_(char ch, uint32_t *value) {
     if (value == nullptr) {
@@ -255,7 +269,7 @@ class JsonReader {
     return true;
   }
 
-  bool parse_array_(size_t depth) {
+  bool parse_array_(size_t depth, std::vector<std::vector<JsonObjectField>> *objects = nullptr) {
     if (depth > 16U) {
       return fail_("JSON nesting limit exceeded");
     }
@@ -267,8 +281,13 @@ class JsonReader {
       return true;
     }
     while (true) {
-      if (!parse_value_(nullptr, nullptr, depth + 1U)) {
+      std::vector<JsonObjectField> fields;
+      if (objects != nullptr ? !parse_object_(&fields, depth + 1U)
+                             : !parse_value_(nullptr, nullptr, depth + 1U)) {
         return false;
+      }
+      if (objects != nullptr) {
+        objects->push_back(std::move(fields));
       }
       skip_space_();
       if (consume_(']')) {
@@ -629,6 +648,13 @@ bool parse_json_object_fields(const std::string &payload,
                               std::string *error) {
   JsonReader reader(payload);
   return reader.parse_object(fields, error);
+}
+
+bool parse_json_array_objects(const std::string &payload,
+                              std::vector<std::vector<JsonObjectField>> *objects,
+                              std::string *error) {
+  JsonReader reader(payload);
+  return reader.parse_array_objects(objects, error);
 }
 
 const JsonObjectField *find_json_object_field(const std::vector<JsonObjectField> &fields, const char *name) {

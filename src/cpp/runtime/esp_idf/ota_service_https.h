@@ -77,7 +77,8 @@ class HttpsOtaService : public IOtaService {
                          const std::string &image_url,
                          const std::string &channel);
   bool fetch_https_text_(const std::string &url, std::string *body, std::string *error) const;
-  bool parse_manifest_(const std::string &body, ManifestInfo *manifest, std::string *error) const;
+  bool parse_manifest_(std::string body, const std::string &channel,
+                       ManifestInfo *manifest, std::string *error) const;
 
   mutable SemaphoreHandle_t lock_{nullptr};
   SemaphoreHandle_t worker_done_{nullptr};

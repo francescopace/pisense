@@ -21,24 +21,76 @@ using namespace espectre;
 void setUp(void) { esp_http_client_mock_reset(); }
 void tearDown(void) {}
 
-void test_https_ota_manifest_parser_accepts_canonical_and_legacy_url(void) {
-  HttpsOtaService service("native", "esp32-s2", OtaReleaseChannel::DEVELOP);
+namespace {
+
+std::string firmware_catalog(const std::string &artifacts, const char *channel = "develop",
+                             const char *version = "3.1.0") {
+  return std::string(R"({"schema_version":1,"channel":")") + channel +
+      R"(","version":")" + version + R"(","frontends":{
+        "esphome":{"artifacts":[{"chip":"esp32s2","build_type":"ota","url":"https://example.invalid/esphome.bin"}]},
+        "native":{"artifacts":)" + artifacts + "}}}";
+}
+
+const char *const kOtaArtifact =
+    R"({"chip":"esp32s2","build_type":"ota","url":"https://example.invalid/fw.bin"})";
+
+}  // namespace
+
+void test_https_ota_manifest_parser_selects_frontend_chip_and_ota_image(void) {
+  HttpsOtaService service("native", "esp32s2", OtaReleaseChannel::DEVELOP);
   HttpsOtaService::ManifestInfo manifest;
   std::string error;
+  const std::string artifacts = std::string(R"([
+      {"chip":"esp32s2","build_type":"factory","url":"https://example.invalid/factory.bin"},
+      {"chip":"esp32c3","build_type":"ota","url":"https://example.invalid/c3.bin"},
+      {"chip":"esp32s2","build_type":"ota",
+       "compliance":[{"url":"https://example.invalid/license.zip"}],
+       "url":"https://example.invalid/fw.bin"}])");
 
-  TEST_ASSERT_TRUE(service.parse_manifest_(
-      R"({"version":"3.1.0","image_url":"https://example.invalid/fw.bin"})",
-      &manifest, &error));
-  TEST_ASSERT_EQUAL_STRING("3.1.0", manifest.version.c_str());
-  TEST_ASSERT_EQUAL_STRING("https://example.invalid/fw.bin", manifest.image_url.c_str());
+  for (const char *channel : {"release", "preview", "develop"}) {
+    TEST_ASSERT_TRUE(service.parse_manifest_(firmware_catalog(artifacts, channel), channel, &manifest, &error));
+    TEST_ASSERT_EQUAL_STRING("3.1.0", manifest.version.c_str());
+    TEST_ASSERT_EQUAL_STRING("https://example.invalid/fw.bin", manifest.image_url.c_str());
+  }
+}
 
-  TEST_ASSERT_TRUE(service.parse_manifest_(
-      R"({"version":"3.2.0","url":"https://example.invalid/legacy.bin"})",
-      &manifest, &error));
-  TEST_ASSERT_EQUAL_STRING("https://example.invalid/legacy.bin", manifest.image_url.c_str());
-  TEST_ASSERT_FALSE(service.parse_manifest_(R"({"version":"3.2.0"})", &manifest, &error));
-  TEST_ASSERT_EQUAL_STRING("invalid manifest", error.c_str());
-  TEST_ASSERT_FALSE(service.parse_manifest_("{}", nullptr, &error));
+void test_https_ota_manifest_parser_rejects_missing_or_ambiguous_targets(void) {
+  HttpsOtaService service("native", "esp32s2", OtaReleaseChannel::DEVELOP);
+  HttpsOtaService::ManifestInfo manifest;
+  std::string error;
+  for (const std::string &artifacts : {
+      std::string("[]"),
+      std::string(R"([{"chip":"esp32c3","build_type":"ota","url":"https://example.invalid/c3.bin"}])"),
+      std::string(R"([{"chip":"esp32s2","build_type":"factory","url":"https://example.invalid/factory.bin"}])"),
+      std::string("[") + kOtaArtifact + "," + kOtaArtifact + "]",
+      std::string(R"([{"chip":"esp32s2","build_type":"ota","url":"http://example.invalid/fw.bin"}])"),
+      std::string(R"([{"chip":"esp32s2","build_type":"ota"}])"),
+      std::string(R"([{"chip":"esp32s2","build_type":"ota","url":42}])"),
+      std::string(R"([{"chip":"esp32s2","chip":"esp32s2","build_type":"ota","url":"https://example.invalid/fw.bin"}])"),
+      std::string("[null]"), std::string("[{} ,]"), std::string("{}")}) {
+    TEST_ASSERT_FALSE(service.parse_manifest_(firmware_catalog(artifacts), "develop", &manifest, &error));
+    TEST_ASSERT_FALSE(error.empty());
+    TEST_ASSERT_TRUE(manifest.image_url.empty());
+  }
+  HttpsOtaService absent_frontend("matter", "esp32s2", OtaReleaseChannel::DEVELOP);
+  TEST_ASSERT_FALSE(absent_frontend.parse_manifest_(firmware_catalog("[]"), "develop", &manifest, &error));
+}
+
+void test_https_ota_manifest_parser_validates_catalog_metadata(void) {
+  HttpsOtaService service("native", "esp32s2", OtaReleaseChannel::DEVELOP);
+  HttpsOtaService::ManifestInfo manifest;
+  std::string error;
+  const std::string valid = firmware_catalog(std::string("[") + kOtaArtifact + "]");
+  TEST_ASSERT_FALSE(service.parse_manifest_(valid, "preview", &manifest, &error));
+  TEST_ASSERT_FALSE(service.parse_manifest_(firmware_catalog("[]", "develop", ""), "develop", &manifest, &error));
+  for (const char *schema : {"2", "null", "\"1\""}) {
+    std::string invalid = valid;
+    invalid.replace(invalid.find("\"schema_version\":1"), 18, std::string("\"schema_version\":") + schema);
+    TEST_ASSERT_FALSE(service.parse_manifest_(invalid, "develop", &manifest, &error));
+  }
+  TEST_ASSERT_FALSE(service.parse_manifest_("{}", "develop", &manifest, &error));
+  TEST_ASSERT_FALSE(service.parse_manifest_(valid + "garbage", "develop", &manifest, &error));
+  TEST_ASSERT_FALSE(service.parse_manifest_(valid, "develop", nullptr, &error));
 }
 
 void test_https_ota_fetch_enforces_status_and_manifest_size(void) {
@@ -54,12 +106,21 @@ void test_https_ota_fetch_enforces_status_and_manifest_size(void) {
   TEST_ASSERT_EQUAL(1024, g_esp_http_client_mock.last_config.buffer_size_tx);
 
   esp_http_client_mock_reset();
+  g_esp_http_client_mock.response_body = firmware_catalog(std::string("[") + kOtaArtifact + "]");
+  g_esp_http_client_mock.response_body.insert(1, "\"notes\":\"" + std::string(40000, 'x') + "\",");
+  TEST_ASSERT_TRUE(service.fetch_https_text_("https://example.invalid/manifest.json", &body, &error));
+  HttpsOtaService target("native", "esp32s2", OtaReleaseChannel::DEVELOP);
+  HttpsOtaService::ManifestInfo manifest;
+  TEST_ASSERT_TRUE(target.parse_manifest_(body, "develop", &manifest, &error));
+  TEST_ASSERT_EQUAL_STRING("https://example.invalid/fw.bin", manifest.image_url.c_str());
+
+  esp_http_client_mock_reset();
   g_esp_http_client_mock.status_code = 503;
   TEST_ASSERT_FALSE(service.fetch_https_text_("https://example.invalid/manifest.json", &body, &error));
   TEST_ASSERT_TRUE(error.find("503") != std::string::npos);
 
   esp_http_client_mock_reset();
-  g_esp_http_client_mock.response_body.assign(4097U, 'x');
+  g_esp_http_client_mock.response_body.assign(64U * 1024U + 1U, 'x');
   TEST_ASSERT_FALSE(service.fetch_https_text_("https://example.invalid/manifest.json", &body, &error));
   TEST_ASSERT_EQUAL_STRING("manifest too large", error.c_str());
   TEST_ASSERT_FALSE(service.fetch_https_text_("", &body, &error));
@@ -69,7 +130,8 @@ void test_https_ota_fetch_enforces_status_and_manifest_size(void) {
 void test_https_ota_check_updates_status_and_delivers_callback(void) {
   HttpsOtaService service("native", "esp32", OtaReleaseChannel::PREVIEW);
   g_esp_http_client_mock.response_body =
-      R"({"version":"99.0.0","image_url":"https://example.invalid/fw.bin"})";
+      firmware_catalog(R"([{"chip":"esp32","build_type":"ota","url":"https://example.invalid/fw.bin"}])",
+                       "preview", "99.0.0");
   int callback_count = 0;
   EspectreOtaStatus delivered;
   service.set_status_callback([&](const EspectreOtaStatus& status) {
@@ -91,7 +153,9 @@ void test_https_ota_check_updates_status_and_delivers_callback(void) {
 
 int process(void) {
   UNITY_BEGIN();
-  RUN_TEST(test_https_ota_manifest_parser_accepts_canonical_and_legacy_url);
+  RUN_TEST(test_https_ota_manifest_parser_selects_frontend_chip_and_ota_image);
+  RUN_TEST(test_https_ota_manifest_parser_rejects_missing_or_ambiguous_targets);
+  RUN_TEST(test_https_ota_manifest_parser_validates_catalog_metadata);
   RUN_TEST(test_https_ota_fetch_enforces_status_and_manifest_size);
   RUN_TEST(test_https_ota_check_updates_status_and_delivers_callback);
   return UNITY_END();

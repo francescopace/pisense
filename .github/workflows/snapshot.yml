@@ -192,7 +192,6 @@ jobs:
             --release-tag "${{ steps.snapshot.outputs.tag }}" \
             --commit "${{ needs.validate-run.outputs.head_sha }}" \
             --compliance-url-prefix "https://espectre.dev/artifacts/firmware/${{ steps.snapshot.outputs.channel }}" \
-            --native-ota-manifest-dir firmware \
             --require-complete-matrix
 
       - name: Build firmware compliance bundle
@@ -271,7 +270,6 @@ jobs:
             **Date:** ${{ needs.validate-run.outputs.created_at }}
           files: |
             firmware/*.bin
-            firmware/espectre-native-ota-*.json
             firmware/firmware-compliance-*.zip
             firmware/firmware-manifest-*.json
             sdk/*.tar.gz
@@ -316,7 +314,9 @@ jobs:
               '-third-party-licenses.zip'
             ];
             for (const asset of assets) {
-              if (!legacyNames.has(asset.name) && !legacySuffixes.some(suffix => asset.name.endsWith(suffix))) {
+              const supersededOtaManifest = uploadedNames.has(`firmware-manifest-${process.env.SNAPSHOT_CHANNEL}.json`) &&
+                /^espectre-native-ota-esp32(?:c3|c5|c6|s2|s3)?\.json$/.test(asset.name);
+              if (!supersededOtaManifest && !legacyNames.has(asset.name) && !legacySuffixes.some(suffix => asset.name.endsWith(suffix))) {
                 continue;
               }
               await github.rest.repos.deleteReleaseAsset({

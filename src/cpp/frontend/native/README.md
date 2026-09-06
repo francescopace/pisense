@@ -127,7 +127,7 @@ Native uses the shared ESP-IDF HTTPS OTA service. Direct exposes the `ota` resou
 - Reconnection republishes device identity, online status, and OTA state.
 - USB reflashing with the full factory image remains the recovery path when OTA cannot complete.
 
-The per-chip manifest is named `espectre-native-ota-<chip>.json`. Its image URL points to the matching application-only `-ota.bin` artifact.
+OTA reads the shared `firmware-manifest-<channel>.json` catalog: `release` uses the latest stable GitHub release, `preview` uses `snapshot`, and `develop` uses `snapshot-dev`. The service validates the catalog schema and channel, then selects the unique Native artifact matching the device chip and `build_type: "ota"`. Its URL points to the application-only `-ota.bin` image. Missing or ambiguous matches fail the update check.
 
 ## Troubleshooting
 
