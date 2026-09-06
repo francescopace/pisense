@@ -80,10 +80,11 @@ const char *peer_disconnect_reason(int error) {
   }
 }
 
-bool read_only_method(const std::string &method) {
+bool read_only_method(const std::string &method, const EspectreProtocolExtension *extension) {
+  if (const auto *route = find_extension_route(extension, method)) return route->kind == EspectreApiRouteKind::RESOURCE;
   return method == "capabilities" || method == "device" || method == "health" ||
          method == "sensing" || method == "wifi" || method == "mqtt" ||
-         method == "read_diagnostics" || method == "ota" || method == "devices" ||
+         method == "read_diagnostics" || method == "devices" ||
          method == "wifi_access_points";
 }
 
@@ -126,11 +127,11 @@ bool session_id_present(const uint8_t *session_id) {
   return false;
 }
 
-bool conflicts_with_csi_collection(const std::string &command) {
+bool conflicts_with_csi_collection(const std::string &command, const EspectreProtocolExtension *extension) {
+  if (const auto *route = find_extension_route(extension, command)) return !route->allowed_during_raw_collection;
   return command == "update_sensing" || command == "recalibrate" ||
          command == "scan_wifi" || command == "set_wifi_bssid" ||
-         command == "clear_wifi_bssid" || command == "clear_wifi_credentials" ||
-         command == "check_ota" || command == "start_ota";
+         command == "clear_wifi_bssid" || command == "clear_wifi_credentials";
 }
 
 std::string sse_payload(const std::string &event_name, const std::string &data_json) {
@@ -185,6 +186,7 @@ bool EspIdfDirectHttpService::setup(const DirectHttpServiceConfig &config,
     pending_event_connections_ = 0U;
     unlock_();
   }
+  if (config.protocol_extension != nullptr && !validate_protocol_extension(*config.protocol_extension)) return false;
   config_ = config;
   request_handler_ = std::move(request_handler);
   deferred_request_handler_ = {};
@@ -763,7 +765,7 @@ esp_err_t EspIdfDirectHttpService::handle_request_(httpd_req_t *request) {
   DirectRequest direct;
   std::string error;
   if (!parse_direct_http_request(http_method_name(request->method), request->uri,
-                                 payload, &direct, &error)) {
+                                 payload, &direct, &error, config_.protocol_extension)) {
     if (lock_()) {
       diagnostics_.malformed_requests += 1U;
       unlock_();
@@ -774,7 +776,7 @@ esp_err_t EspIdfDirectHttpService::handle_request_(httpd_req_t *request) {
   }
 
   bool csi_conflict = false;
-  if (conflicts_with_csi_collection(direct.command) && lock_()) {
+  if (conflicts_with_csi_collection(direct.command, config_.protocol_extension) && lock_()) {
     csi_conflict = pending_raw_open_.request != nullptr ||
                    raw_session_active_.load(std::memory_order_acquire);
     unlock_();
@@ -1045,7 +1047,7 @@ bool EspIdfDirectHttpService::request_allowed_locked_(uint64_t now_us) {
 }
 
 bool EspIdfDirectHttpService::mutation_allowed_locked_(const std::string &method, uint64_t now_us) {
-  if (read_only_method(method)) return true;
+  if (read_only_method(method, config_.protocol_extension)) return true;
   if (mutation_window_started_us_ == 0U || now_us - mutation_window_started_us_ >= kMutationWindowUs) {
     mutation_window_started_us_ = now_us;
     mutation_count_ = 0U;

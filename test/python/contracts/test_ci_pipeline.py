@@ -337,7 +337,7 @@ def test_coverage_badge_builder_reads_each_report_format(
 
 
 def _ota_release_tags() -> tuple[str, str]:
-    header = PROTOCOL_HEADER.read_text(encoding="utf-8")
+    header = (REPO_ROOT / "src/cpp/frontend/ota_protocol.h").read_text(encoding="utf-8")
     preview = re.search(r'ESPECTRE_OTA_RELEASE_TAG_PREVIEW\s*=\s*"([^"]+)"', header)
     develop = re.search(r'ESPECTRE_OTA_RELEASE_TAG_DEVELOP\s*=\s*"([^"]+)"', header)
     assert preview is not None and develop is not None
@@ -362,10 +362,8 @@ def test_sdk_archives_and_manifest_are_reproducible(tmp_path: Path) -> None:
     component_cmake = (REPO_ROOT / "src" / "cpp" / "CMakeLists.txt").read_text(encoding="utf-8")
     for dependency in (
         "mqtt",
-        "app_update",
         "esp_http_client",
         "esp_http_server",
-        "esp_https_ota",
         "esp-tls",
         "improv",
         "mdns",
@@ -397,7 +395,6 @@ def test_sdk_archives_and_manifest_are_reproducible(tmp_path: Path) -> None:
         "ESPECTRE_RUNTIME_FRONTEND_SUPPORT_SOURCES",
         "ESPECTRE_RUNTIME_ESP_IDF_MQTT_SOURCES",
         "ESPECTRE_RUNTIME_ESP_IDF_PROVISIONING_SOURCES",
-        "ESPECTRE_RUNTIME_ESP_IDF_OTA_SOURCES",
         "ESPECTRE_RUNTIME_ESP_IDF_DIRECT_SOURCES",
     ]
     zip_path = next(outputs[0].glob("*.zip"))
@@ -609,25 +606,118 @@ def test_release_validator_requires_a_finalized_matching_changelog(
     validator.validate("3.0.0-rc1")
 
 
-def test_unstamped_sdk_header_has_no_numeric_fallback() -> None:
+def test_sdk_packaging_requires_a_stamped_identity(tmp_path: Path) -> None:
     builder = load_script("build_sdk_package")
-    header = (REPO_ROOT / "src" / "cpp" / "runtime" / "espectre_sdk_version.h").read_text(
-        encoding="utf-8"
-    )
-    assert "#define ESPECTRE_SDK_VERSION_STRING" not in header
-    assert "ESPectre SDK version is unresolved" in header
     with pytest.raises(ValueError, match="Unable to detect ESPECTRE_SDK_VERSION_STRING"):
         builder.detect_sdk_version()
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, capture_output=True)
+    with pytest.raises(ValueError, match="git describe failed"):
+        load_script("detect_git_version").detect_git_version(tmp_path)
 
 
-def test_git_version_cmake_reads_environment_before_git_describe() -> None:
-    cmake = (REPO_ROOT / "src" / "cpp" / "espectre_git_version.cmake").read_text(encoding="utf-8")
-    env_index = cmake.index("ENV{ESPECTRE_GIT_VERSION}")
-    describe_index = cmake.index('git describe --tags --match "[0-9]*" --abbrev=7')
-    workspace_index = cmake.index("ENV{GITHUB_WORKSPACE}")
-    assert env_index < describe_index
-    assert describe_index < cmake.index("header is not stamped")
-    assert workspace_index < cmake.index("header is not stamped")
+@pytest.mark.parametrize(
+    ("defines", "descriptor", "expected"),
+    [
+        ({}, "3.0.0-rc1", "3.0.0-rc1"),
+        ({"APP_PROJECT_VER": "idf-build"}, "2026.8.2", "idf-build"),
+        ({}, "2026.8.2", "2026.8.2"),
+        ({}, "", "unknown"),
+        ({}, None, "unknown"),
+    ],
+)
+def test_frontend_firmware_version(
+    tmp_path: Path, defines: dict[str, str], descriptor: str | None, expected: str,
+) -> None:
+    if descriptor is not None:
+        (tmp_path / "esp_app_desc.h").write_text(
+            'struct esp_app_desc_t { const char *version; };\n'
+            'inline const esp_app_desc_t *esp_app_get_description() {\n'
+            f'  static const esp_app_desc_t value = {{{json.dumps(descriptor)}}};\n'
+            '  return &value;\n}\n',
+            encoding="utf-8",
+        )
+    probe = tmp_path / "version.cpp"
+    probe.write_text(
+        '#include "frontend/frontend_firmware_version.h"\n'
+        '#include "runtime/espectre_sdk_version.h"\n'
+        '#include <string_view>\n'
+        'int main() {\n'
+        f'  return std::string_view(espectre::frontend_firmware_version()) == {json.dumps(expected)}\n'
+        '      && std::string_view(espectre::espectre_sdk_version()) == "0.0.0" ? 0 : 1;\n}\n',
+        encoding="utf-8",
+    )
+    cpp = REPO_ROOT / "src/cpp"
+    executable = tmp_path / "version"
+    subprocess.run(
+        ["c++", "-std=c++17", "-Werror", "-I", str(tmp_path), "-I", str(cpp),
+         *(f"-D{name}={json.dumps(value)}" for name, value in defines.items()),
+         str(cpp / "frontend/frontend_firmware_version.cpp"),
+         str(probe), "-o", str(executable)],
+        check=True, capture_output=True, text=True,
+    )
+    subprocess.run([str(executable)], check=True, capture_output=True, text=True)
+
+
+@pytest.mark.parametrize("stamped", [None, "3.0.0-rc1"])
+@pytest.mark.parametrize("override", [None, "3.1.0-ci", "major_only", "string_only"])
+def test_sdk_version_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    stamped: str | None, override: str | None,
+) -> None:
+    builder = load_script("build_sdk_package")
+    cpp = tmp_path / "vendor/sdk/src/cpp"
+    (cpp / "runtime").mkdir(parents=True)
+    header = cpp / "runtime/espectre_sdk_version.h"
+    shutil.copyfile(REPO_ROOT / "src/cpp/runtime/espectre_sdk_version.h", header)
+    if stamped:
+        builder.stamp_sdk_version_header(header, stamped)
+        assert builder.detect_sdk_version(header) == stamped
+
+    # A vendored SDK keeps its own identity, even inside a tagged application.
+    for command in (
+        ["git", "init", "-q", str(tmp_path)],
+        ["git", "-C", str(tmp_path), "add", "."],
+        ["git", "-C", str(tmp_path), "-c", "user.name=Test", "-c",
+         "user.email=test@example.com", "-c", "commit.gpgsign=false",
+         "commit", "-qm", "Application fixture"],
+        ["git", "-C", str(tmp_path), "tag", "9.9.9"],
+    ):
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    monkeypatch.setenv("ESPECTRE_GIT_VERSION", "unrelated-firmware-version")
+    partial = override in ("major_only", "string_only")
+    expected = "0.0.0" if partial else override or stamped or "0.0.0"
+    major, minor, patch = builder.parse_version_core(expected)
+    source = (
+        '#include "runtime/espectre_sdk_version.h"\n'
+        '#include <string_view>\n'
+        f'static_assert(std::string_view(espectre::espectre_sdk_version()) == "{expected}");\n'
+        f'static_assert(ESPECTRE_SDK_VERSION_MAJOR == {major});\n'
+        f'static_assert(ESPECTRE_SDK_VERSION_MINOR == {minor});\n'
+        f'static_assert(ESPECTRE_SDK_VERSION_PATCH == {patch});\n'
+        f'static_assert(ESPECTRE_SDK_VERSION_NUMBER == {major * 10000 + minor * 100 + patch});\n'
+        f'#if !ESPECTRE_SDK_VERSION_AT_LEAST({major}, {minor}, {patch})\n'
+        '#error "SDK must satisfy its own numeric version"\n'
+        '#endif\n'
+        f'#if ESPECTRE_SDK_VERSION_AT_LEAST({major + 1}, 0, 0)\n'
+        '#error "SDK must not satisfy a newer release"\n'
+        '#endif\n'
+    )
+    command = ["c++", "-std=c++17", "-Werror", "-fsyntax-only", "-x", "c++", "-I", str(cpp), "-"]
+    if override == "major_only":
+        command.append("-DESPECTRE_SDK_VERSION_MAJOR=3")
+    elif override == "string_only":
+        command.append('-DESPECTRE_SDK_VERSION_STRING="3.1.0-ci"')
+    elif override:
+        command.extend([
+            f'-DESPECTRE_SDK_VERSION_STRING="{override}"',
+            f"-DESPECTRE_SDK_VERSION_MAJOR={major}",
+            f"-DESPECTRE_SDK_VERSION_MINOR={minor}",
+            f"-DESPECTRE_SDK_VERSION_PATCH={patch}",
+        ])
+    result = subprocess.run(
+        command, cwd=cpp, input=source, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_native_loop_processes_wifi_events_before_frontend_updates() -> None:
@@ -637,31 +727,6 @@ def test_native_loop_processes_wifi_events_before_frontend_updates() -> None:
     loop = source[source.index("void espectre_loop_task") : source.index("bool init_wifi_station")]
 
     assert loop.index("g_wifi_manager.loop();") < loop.index("g_frontend->loop();")
-
-
-def test_esphome_forwards_numeric_project_version_to_sdk_cmake() -> None:
-    pytest.importorskip("esphome")
-    path = (
-        REPO_ROOT
-        / "src"
-        / "cpp"
-        / "frontend"
-        / "esphome"
-        / "components"
-        / "espectre"
-        / "__init__.py"
-    )
-    spec = importlib.util.spec_from_file_location("espectre_esphome_component", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    module._git_describe_version = lambda _root: "2.8.0-1-gabcdef0"
-    assert module.resolve_espectre_git_version("9.9.9-ci-gdeadbee") == "9.9.9-ci-gdeadbee"
-    assert module.resolve_espectre_git_version("main") == "2.8.0-1-gabcdef0"
-
-    module._git_describe_version = lambda _root: None
-    assert module.resolve_espectre_git_version("main") is None
 
 
 def test_git_version_cmake_honors_environment(tmp_path: Path) -> None:

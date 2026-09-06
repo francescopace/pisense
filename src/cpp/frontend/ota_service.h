@@ -12,7 +12,7 @@
 #include <functional>
 #include <string>
 
-#include "espectre_protocol.h"
+#include "ota_protocol.h"
 
 namespace espectre {
 
@@ -23,7 +23,7 @@ namespace espectre {
  * the shipped `HttpsOtaService` (`ota_service_https.h`), which resolves a
  * release manifest over HTTPS and applies the image with `esp_https_ota`.
  * Frontends expose the result over their operational transport and never talk
- * to the underlying stack themselves. Native uses MQTT for this surface.
+ * to the underlying stack themselves. Native uses Direct HTTP and MQTT for this surface.
  *
  * @par Threading
  * Deliver status and prepare callbacks from `loop()`, never from a private
@@ -58,8 +58,8 @@ class IOtaService {
   /**
    * Ask whether a newer release exists, without downloading it.
    *
-   * @param current_version Version to compare against, normally
-   *        `espectre_firmware_version()`. Empty is reported as `"unknown"`.
+   * @param current_version Application version supplied by the caller.
+   *        Empty is reported as `"unknown"`.
    * @return false when an operation is already in flight or the worker cannot
    *         start. True only means the check began; the answer arrives as
    *         `UPDATE_AVAILABLE` or `UP_TO_DATE` through the status callback.
@@ -68,8 +68,8 @@ class IOtaService {
   /**
    * Same as `start_check(current_version)`, with an optional release channel.
    *
-   * @param current_version Version to compare against, normally
-   *        `espectre_firmware_version()`. Empty is reported as `"unknown"`.
+   * @param current_version Application version supplied by the caller.
+   *        Empty is reported as `"unknown"`.
    * @param channel `release`, `preview`, or `develop`. Empty keeps the
    *        implementation default.
    * @return false when an operation is already in flight, the channel is
@@ -87,7 +87,7 @@ class IOtaService {
    * Performs its own check first, so calling `start_check()` beforehand is
    * optional. The prepare callback fires once the target is resolved and
    * before the download begins: that is where you call
-   * `RuntimeFrontendController::quiesce_for_ota()` and stop your own traffic.
+   * `RuntimeFrontendController::quiesce()` and stop your own traffic.
    *
    * @return false when an operation is already in flight or the worker cannot
    *         start. A successful update ends in `REBOOT_SCHEDULED`.
@@ -96,8 +96,8 @@ class IOtaService {
   /**
    * Same as `start_update(current_version)`, with an optional release channel.
    *
-   * @param current_version Version to compare against, normally
-   *        `espectre_firmware_version()`. Empty is reported as `"unknown"`.
+   * @param current_version Application version supplied by the caller.
+   *        Empty is reported as `"unknown"`.
    * @param channel `release`, `preview`, or `develop`. Empty keeps the
    *        implementation default.
    * @return false when an operation is already in flight, the channel is

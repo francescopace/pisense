@@ -16,8 +16,6 @@ set(ESPECTRE_RUNTIME_COMMON_SOURCES
     "${ESPECTRE_CPP_ROOT}/runtime/csi_traffic_service.cpp"
     "${ESPECTRE_CPP_ROOT}/runtime/periodic_sensing_status_logger.cpp"
     "${ESPECTRE_CPP_ROOT}/runtime/espectre_protocol.cpp"
-    "${ESPECTRE_CPP_ROOT}/runtime/firmware_version.cpp"
-    "${ESPECTRE_CPP_ROOT}/runtime/ota_version.cpp"
     "${ESPECTRE_CPP_ROOT}/runtime/direct_http_protocol.cpp"
     "${ESPECTRE_CPP_ROOT}/runtime/peer_discovery.cpp"
     "${ESPECTRE_CPP_ROOT}/runtime/protocol_json.cpp"
@@ -28,10 +26,10 @@ set(ESPECTRE_RUNTIME_COMMON_SOURCES
 )
 
 set(ESPECTRE_RUNTIME_FRONTEND_SUPPORT_SOURCES
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/frontend_bootstrap_helpers.cpp"
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/frontend_ha_mqtt_helpers.cpp"
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/frontend_mqtt_helpers.cpp"
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/frontend_sysinfo_helpers.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_bootstrap_helpers.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_ha_mqtt_helpers.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_mqtt_helpers.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_sysinfo_helpers.cpp"
 )
 
 set(ESPECTRE_RUNTIME_ESP_IDF_PLATFORM_SOURCES
@@ -64,22 +62,18 @@ set(ESPECTRE_RUNTIME_ESP_IDF_SOURCES
     ${ESPECTRE_RUNTIME_ESP_IDF_PLATFORM_SOURCES}
 )
 
-set(ESPECTRE_RUNTIME_ESP_IDF_OTA_SOURCES
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/ota_service_https.cpp"
-)
-
 set(ESPECTRE_RUNTIME_ESP_IDF_IMPROV_SOURCES
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/improv_serial_service.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/improv_serial_service.cpp"
 )
 
 set(ESPECTRE_RUNTIME_ESP_IDF_PROVISIONING_SOURCES
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/device_config_store.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/device_config_store.cpp"
     ${ESPECTRE_RUNTIME_ESP_IDF_IMPROV_SOURCES}
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/wifi_provisioning_service.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/wifi_provisioning_service.cpp"
 )
 
 set(ESPECTRE_RUNTIME_ESP_IDF_MQTT_SOURCES
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/mqtt_transport_esp_idf.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/mqtt_transport_esp_idf.cpp"
 )
 
 set(ESPECTRE_RUNTIME_ESP_IDF_DIRECT_SOURCES
@@ -88,12 +82,27 @@ set(ESPECTRE_RUNTIME_ESP_IDF_DIRECT_SOURCES
     "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/mdns_bootstrap_responder.cpp"
     "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/mdns_discovery_service.cpp"
     "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/peer_discovery_service_esp_idf.cpp"
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/raw_csi_session_controller.cpp"
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/runtime_direct_http_bridge.cpp"
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/wifi_bssid_pin_service.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/raw_csi_session_controller.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/runtime_direct_http_bridge.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/wifi_bssid_pin_service.cpp"
+)
+
+set(ESPECTRE_FRONTEND_OTA_PROTOCOL_SOURCES
+    "${ESPECTRE_CPP_ROOT}/frontend/ota_protocol.cpp"
+    "${ESPECTRE_CPP_ROOT}/frontend/ota_version.cpp"
+)
+
+set(ESPECTRE_FRONTEND_OTA_SOURCES
+    ${ESPECTRE_FRONTEND_OTA_PROTOCOL_SOURCES}
+    "${ESPECTRE_CPP_ROOT}/frontend/ota_service_https.cpp"
+)
+
+set(ESPECTRE_FRONTEND_COMMON_SOURCES
+    "${ESPECTRE_CPP_ROOT}/frontend/frontend_firmware_version.cpp"
 )
 
 set(ESPECTRE_FRONTEND_ESPHOME_SOURCES
+    ${ESPECTRE_FRONTEND_COMMON_SOURCES}
     "${ESPECTRE_CPP_ROOT}/frontend/esphome/components/espectre/esphome_log_sink.cpp"
     "${ESPECTRE_CPP_ROOT}/frontend/esphome/components/espectre/recalibrate_button.cpp"
     "${ESPECTRE_CPP_ROOT}/frontend/esphome/components/espectre/sensing_switch.cpp"
@@ -107,10 +116,12 @@ set(ESPECTRE_FRONTEND_ESPHOME_SOURCES
 )
 
 set(ESPECTRE_FRONTEND_MATTER_SOURCES
+    ${ESPECTRE_FRONTEND_COMMON_SOURCES}
     "${ESPECTRE_CPP_ROOT}/frontend/matter/espectre/matter_frontend.cpp"
 )
 
 set(ESPECTRE_FRONTEND_NATIVE_SOURCES
+    ${ESPECTRE_FRONTEND_COMMON_SOURCES}
     "${ESPECTRE_CPP_ROOT}/frontend/native/espectre/home_assistant_mqtt_frontend.cpp"
     "${ESPECTRE_CPP_ROOT}/frontend/native/espectre/native_command_bindings.cpp"
     "${ESPECTRE_CPP_ROOT}/frontend/native/espectre/native_direct_frontend.cpp"
@@ -136,7 +147,6 @@ set(ESPECTRE_CORE_INCLUDE_DIRS
 set(ESPECTRE_RUNTIME_INCLUDE_DIRS
     "${ESPECTRE_CPP_ROOT}/runtime"
     "${ESPECTRE_CPP_ROOT}/runtime/esp_idf"
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support"
 )
 
 set(ESPECTRE_SHARED_INCLUDE_DIRS

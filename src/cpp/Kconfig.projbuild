@@ -28,14 +28,6 @@ config ESPECTRE_SDK_ENABLE_PROVISIONING
         service used to commission credentials over Improv Serial and Direct
         HTTP.
 
-config ESPECTRE_SDK_ENABLE_OTA
-    bool "Build the HTTPS OTA service"
-    default n
-    help
-        Adds HttpsOtaService, which resolves a release manifest over HTTPS and
-        applies the image with esp_https_ota. Leave it off if your product
-        owns firmware updates.
-
 config ESPECTRE_SDK_ENABLE_DIRECT
     bool "Build the Direct HTTP control plane"
     default n

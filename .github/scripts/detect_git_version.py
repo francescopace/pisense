@@ -10,7 +10,7 @@ version string.
 
 Keep the git arguments in sync with `src/cpp/espectre_git_version.cmake`. CMake also
 accepts `-DESPECTRE_GIT_VERSION` or the `ESPECTRE_GIT_VERSION` environment variable
-when the checkout has no numeric tags, such as an ESPHome GitHub clone.
+for first-party firmware builds when the checkout has no numeric tags.
 """
 
 from __future__ import annotations

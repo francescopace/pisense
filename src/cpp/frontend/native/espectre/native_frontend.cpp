@@ -361,7 +361,7 @@ void NativeFrontend::publish_runtime_status_state_() {
 }
 
 EspectreDeviceInfo NativeFrontend::mqtt_protocol_device_info_() const {
-  EspectreDeviceInfo info = normalize_protocol_device_info(device_info_, &runtime_.snapshot(), ota_service_ != nullptr,
+  EspectreDeviceInfo info = normalize_protocol_device_info(device_info_, &runtime_.snapshot(),
                                                            "native", CONFIG_IDF_TARGET);
   info.supports_info = true;
   info.supports_diagnostics = true;
@@ -407,7 +407,7 @@ void NativeFrontend::prepare_for_ota_() {
   ota_services_were_armed_ = runtime_.services_armed();
   mqtt_frontend_->shutdown();
   direct_frontend_->shutdown();
-  runtime_.quiesce_for_ota();
+  runtime_.quiesce();
 }
 
 void NativeFrontend::resume_after_ota_error_() {

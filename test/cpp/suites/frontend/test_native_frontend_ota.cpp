@@ -204,6 +204,59 @@ void test_native_frontend_direct_ota_returns_status_and_streams_updates(void) {
 }
 
 
+void test_native_frontend_ota_dispatch_preserves_decoded_channels_on_both_transports(void) {
+  MockMqttTransport mqtt;
+  MockOtaService ota;
+  MockDirectHttpService direct;
+  NativeFrontend frontend(&mqtt, &ota, &direct);
+  EspectreDeviceConfig config;
+  config.mqtt_scheme = "mqtt";
+  config.mqtt_host = "localhost";
+  config.mqtt_port = 1883U;
+  frontend.set_device_config(config);
+  EspectreDeviceInfo info;
+  info.firmware_version = "1.2.3";
+  info.network.ip_address = "192.168.1.42";
+  frontend.set_device_info(info);
+  TEST_ASSERT_TRUE(frontend.setup());
+
+  const struct {
+    const char *parameters;
+    const char *channel;
+  } cases[] = {
+      {R"({"channel":"preview"})", ESPECTRE_OTA_CHANNEL_PREVIEW},
+      {R"({"chan\u006eel":"preview"})", ESPECTRE_OTA_CHANNEL_PREVIEW},
+      {R"({"channel":"\u0070review"})", ESPECTRE_OTA_CHANNEL_PREVIEW},
+      {"{}", ""},
+  };
+  for (const char *name : {"check_ota", "start_ota"}) {
+    for (const auto &test : cases) {
+      for (bool over_mqtt : {true, false}) {
+        const int checks_before = ota_service_mock::state.start_check_calls;
+        const int updates_before = ota_service_mock::state.start_update_calls;
+        if (over_mqtt) {
+          std::string payload = "{\"command_id\":\"channel\",\"command\":\"";
+          payload += name;
+          payload += '"';
+          const std::string parameters = test.parameters;
+          if (parameters != "{}") payload += ',' + parameters.substr(1U, parameters.size() - 2U);
+          payload += '}';
+          mqtt.emit_command(payload);
+        } else {
+          const std::string result = direct.emit_request(DirectRequest{"channel", name, test.parameters});
+          TEST_ASSERT_TRUE(result.find("\"accepted\":true") != std::string::npos);
+        }
+        TEST_ASSERT_EQUAL(checks_before + (std::string(name) == "check_ota" ? 1 : 0),
+                          ota_service_mock::state.start_check_calls);
+        TEST_ASSERT_EQUAL(updates_before + (std::string(name) == "start_ota" ? 1 : 0),
+                          ota_service_mock::state.start_update_calls);
+        TEST_ASSERT_EQUAL_STRING(test.channel, ota_service_mock::state.last_channel.c_str());
+        TEST_ASSERT_EQUAL_STRING("1.2.3", ota_service_mock::state.last_current_version.c_str());
+      }
+    }
+  }
+}
+
 int main(int argc, char **argv) {
   (void) argc;
   (void) argv;
@@ -213,5 +266,6 @@ int main(int argc, char **argv) {
   RUN_TEST(test_native_frontend_ota_prepare_quiesces_transports_and_recovers_on_error);
   RUN_TEST(test_native_frontend_ota_error_restores_the_previous_sensing_state);
   RUN_TEST(test_native_frontend_direct_ota_returns_status_and_streams_updates);
+  RUN_TEST(test_native_frontend_ota_dispatch_preserves_decoded_channels_on_both_transports);
   return UNITY_END();
 }

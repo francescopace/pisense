@@ -15,7 +15,6 @@
 #include <string>
 
 #include "espectre_protocol.h"
-#include "ota_service.h"
 #include "runtime_config_utils.h"
 
 namespace espectre {
@@ -63,7 +62,6 @@ enum class FrontendCommandChange : uint8_t {
   SENSING = 1U << 2U,
   WIFI = 1U << 3U,
   MQTT = 1U << 4U,
-  OTA = 1U << 5U,
 };
 
 inline FrontendCommandChange operator|(FrontendCommandChange lhs, FrontendCommandChange rhs) {
@@ -98,14 +96,16 @@ DeviceConfigCommandResult handle_device_config_command(const std::string &comman
                                                        DeviceConfigClearHandler clear_handler,
                                                        DeviceConfigUpdateHandler update_handler);
 
-bool frontend_command_allowed_during_raw_collection(const std::string &command);
+bool frontend_command_allowed_during_raw_collection(
+    const std::string &command, const EspectreProtocolExtension *extension = nullptr);
 
 class FrontendCommandEngine {
  public:
+  /** Execute a successfully parsed command. Call a protocol parser first;
+   * this dispatcher checks capabilities and operational state, not parameters.
+   */
   FrontendCommandResult execute(const EspectreCommand &command,
                                 const FrontendCommandContext &context,
-                                IOtaService *ota_service,
-                                const char *current_version,
                                 const FrontendCommandCapabilities &capabilities,
                                 FrontendReadPayloadCallback read_payload_callback,
                                 FrontendDeviceLabelCallback device_label_callback = {},

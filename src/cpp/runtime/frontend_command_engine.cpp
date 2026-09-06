@@ -16,10 +16,12 @@ const char *frontend_command_parse_error_code(const std::string &error) {
   return error == "unsupported protocol_version" ? "unsupported_version" : "invalid_params";
 }
 
-bool frontend_command_allowed_during_raw_collection(const std::string &command) {
+bool frontend_command_allowed_during_raw_collection(const std::string &command,
+                                                   const EspectreProtocolExtension *extension) {
+  if (const auto *route = find_extension_route(extension, command)) return route->allowed_during_raw_collection;
   return command == "capabilities" || command == "device" || command == "health" ||
          command == "sensing" || command == "wifi" || command == "mqtt" ||
-         command == "read_diagnostics" || command == "ota" || command == "devices" ||
+         command == "read_diagnostics" || command == "devices" ||
          command == "wifi_access_points" || command == "update_device" ||
          command == "update_mqtt" || command == "clear_mqtt";
 }
@@ -105,8 +107,6 @@ DeviceConfigCommandResult handle_device_config_command(const std::string &comman
 FrontendCommandResult FrontendCommandEngine::execute(
     const EspectreCommand &command,
     const FrontendCommandContext &context,
-    IOtaService *ota_service,
-    const char *current_version,
     const FrontendCommandCapabilities &capabilities,
     FrontendReadPayloadCallback read_payload_callback,
     FrontendDeviceLabelCallback device_label_callback,
@@ -151,8 +151,7 @@ FrontendCommandResult FrontendCommandEngine::execute(
 
   if (context.origin == FrontendCommandOrigin::MQTT &&
       command.command != "update_device" && command.command != "update_sensing" &&
-      command.command != "recalibrate" && command.command != "read_diagnostics" &&
-      command.command != "check_ota" && command.command != "start_ota") {
+      command.command != "recalibrate" && command.command != "read_diagnostics") {
     return reject("forbidden", "command is not available over MQTT");
   }
 
@@ -183,11 +182,8 @@ FrontendCommandResult FrontendCommandEngine::execute(
   }
 
   if (command.command == "update_device") {
-    if (!supports(EspectreDirectMethod::SET_DEVICE_LABEL) || !device_label_callback ||
-        !command.has_device_label) {
-      return !supports(EspectreDirectMethod::SET_DEVICE_LABEL) || !device_label_callback
-                 ? reject("unsupported", "unsupported command")
-                 : reject("invalid_params", "invalid device label (accepted: a single-line string)");
+    if (!supports(EspectreDirectMethod::SET_DEVICE_LABEL) || !device_label_callback) {
+      return reject("unsupported", "unsupported command");
     }
     result.accepted = device_label_callback(command.device_label, &result.message);
     result.code = result.accepted ? "ok" : "unavailable";
@@ -246,7 +242,7 @@ FrontendCommandResult FrontendCommandEngine::execute(
 
   if (command.command == "update_sensing") {
     if (command.has_threshold && (!supports(EspectreDirectMethod::SET_THRESHOLD) ||
-                                  !threshold_callback || !validate_runtime_threshold(command.threshold))) {
+                                  !threshold_callback)) {
       return reject("invalid_params", "invalid threshold (accepted: 0.0-1.0)");
     }
     if (command.has_motion_hits && (!supports(EspectreDirectMethod::SET_MOTION_HITS) || !motion_hits_callback)) {
@@ -254,11 +250,6 @@ FrontendCommandResult FrontendCommandEngine::execute(
     }
     if (command.has_detector && (!supports(EspectreDirectMethod::SET_DETECTOR) || !detector_callback)) {
       return reject("unsupported", "detector update is unsupported");
-    }
-    if (command.has_motion_hits && (command.motion_on_hits < RUNTIME_MOTION_HITS_MIN ||
-        command.motion_on_hits > RUNTIME_MOTION_HITS_MAX || command.motion_off_hits < RUNTIME_MOTION_HITS_MIN ||
-        command.motion_off_hits > RUNTIME_MOTION_HITS_MAX)) {
-      return reject("invalid_params", "invalid motion hits (accepted: motion_on_hits and motion_off_hits in 1-20)");
     }
     if (command.has_csi_traffic_mode &&
         (!supports(EspectreDirectMethod::SET_CSI_TRAFFIC_MODE) || !csi_traffic_mode_callback)) {
@@ -309,35 +300,6 @@ FrontendCommandResult FrontendCommandEngine::execute(
     if (result.message.empty()) {
       result.message = result.accepted ? "recalibration started" : "recalibration rejected";
     }
-    return result;
-  }
-
-  if (command.command == "ota" || command.command == "check_ota" || command.command == "start_ota") {
-    EspectreDirectMethod method = EspectreDirectMethod::OTA_STATUS;
-    if (command.command == "check_ota") method = EspectreDirectMethod::OTA_CHECK;
-    if (command.command == "start_ota") method = EspectreDirectMethod::OTA_START;
-    if (!supports(method)) {
-      return reject("unsupported", "unsupported command");
-    }
-    if (ota_service == nullptr) {
-      return reject("unavailable", "ota unavailable");
-    }
-    const std::string normalized_current_version =
-        (current_version == nullptr || current_version[0] == '\0') ? "unknown" : current_version;
-    if (command.command == "ota") {
-      return accept_read("ota status returned");
-    }
-    if (command.command == "check_ota") {
-      result.accepted = ota_service->start_check(normalized_current_version, command.ota_channel);
-      result.code = result.accepted ? "ok" : "busy";
-      if (result.accepted) result.changes = FrontendCommandChange::OTA;
-      result.message = result.accepted ? "ota check started" : "ota check rejected";
-      return result;
-    }
-    result.accepted = ota_service->start_update(normalized_current_version, command.ota_channel);
-    result.code = result.accepted ? "ok" : "busy";
-    if (result.accepted) result.changes = FrontendCommandChange::OTA;
-    result.message = result.accepted ? "ota update started" : "ota update rejected";
     return result;
   }
 

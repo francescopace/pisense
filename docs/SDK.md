@@ -153,11 +153,10 @@ The shipped frontends provide the reference adapters. ESPHome sends messages to 
 | `runtime/esp_idf/runtime_frontend_controller.h` | The recommended entry point |
 | `runtime/esp_idf/runtime_sensing_kconfig.h` | Build a config from menuconfig |
 | `runtime/espectre_protocol.h` | Wire types, payload builders, command parsers |
+| `runtime/protocol_json.h` | Decoded JSON fields and helpers for command validators |
 | `runtime/mqtt_transport.h` | Implement to reach your own MQTT client |
 | `runtime/direct_http_protocol.h` | Canonical request parsing, Direct HTTP constants, and the executable Direct/MQTT mapping |
 | `runtime/direct_http_service.h` | Implement to expose Direct HTTP resource methods, SSE events, and optional CSI streaming |
-| `runtime/ota_service.h` | Implement to reach your own update channel |
-| `runtime/firmware_version.h` | The application version reported on the wire |
 | `core/detector_types.h`, `core/csi_types.h`, `core/filter_config.h`, `core/detector_limits.h` | Stable value types, dimensions, defaults, and ranges shared by both facades |
 | **Core-only extension** | **Headers below are reached only through `espectre_core_sdk.h`** |
 | `core/lightweight_detector.h`, `core/high_accuracy_detector.h` | The supported core-only detector classes |
@@ -225,7 +224,23 @@ SDK transport adapters should pass parsed requests through `FrontendCommandEngin
 
 The shipped ESP-IDF runtime always collects these counters and bounded performance windows. `RuntimeDiagnosticsSnapshot` also reports heap, CPU frequency, loop load and timing, detector timing, CSI provenance classification, and provenance rejection. Architecture owns how first-party frontends collect and cache those samples, while Protocol owns their transport representation.
 
+### Frontend extensions
+
+All command parameters use `EspectreCommandValidator`: the parser checks JSON syntax and request structure, then invokes the callback registered on the SDK or frontend route. The callback receives decoded `JsonObjectField` values, validates parameters, and fills the command before dispatch. It must not change device state. For frontend commands, `extension_parameters` initially contains the original request, including the MQTT envelope; the validator may replace it with normalized JSON built from the decoded fields. Native's OTA validator uses this to preserve the selected channel independently of envelope values and JSON escapes. The SDK validator checks parameter types and ranges, including thresholds in `0–1` and motion hit counts in `1–20`. ESPHome entity controls use the same parser before calling the command engine.
+
+`FrontendCommandEngine::execute()` and frontend extension handlers require a successfully parsed command. They check capabilities and operational state without repeating parameter validation. Direct runtime and service APIs retain their own argument checks because integrators can call them without a protocol parser.
+
+`EspectreCapabilityProfile::extension` accepts an optional `EspectreProtocolExtension` supplied by the frontend. Each route declares its HTTP method and path, resource or operation name, command name, asynchronous behavior, MQTT availability, raw-collection policy, and parameter validator. The extension also lists its event names. `validate_protocol_extension()` rejects invalid descriptors and collisions with SDK routes, command names, resources, or events.
+
+Use the same immutable catalog for capability output, `DirectHttpServiceConfig::protocol_extension`, `direct_http_request_to_command()`, and `parse_espectre_command()`. Keep it alive while the adapters use it. Direct and MQTT then validate parameters through the same callback, and an unregistered extension command is rejected. The frontend enforces each route's MQTT availability, supplies the command implementation, and publishes any extension events through the normal transports; the SDK does not execute frontend operations itself. Advertise only extensions that the frontend has enabled.
+
+Firmware updates belong to the frontend. The reusable `frontend/ota_service.h`, `frontend/ota_service_https.h`, and `frontend/ota_protocol.h` live in the repository, outside the SDK bundle. Native opts into them with `ESPECTRE_FRONTEND_OTA_SOURCES`; the provided HTTPS implementation targets ESPectre's release catalogs. Other products can implement that frontend interface for their own update mechanism. `frontend_ota_protocol()` supplies Native's additional OTA resources, operations, validation, and events without adding OTA types or policy to the SDK.
+
+`RuntimeFrontendController::quiesce()` is a generic suspension operation: it disables telemetry and sensing services and stops active raw collection while retaining the configured backend. The caller restores its desired service and telemetry gates when resuming. It is useful before a firmware update or another temporary activity that needs CSI and sensing traffic to stop.
+
 ### Versioning
+
+The frontend or integrator supplies its application version explicitly through `EspectreDeviceInfo::firmware_version` and discovery or provisioning configuration. Frontend OTA services also receive the application version directly from their owner. The SDK does not read the ESP-IDF application descriptor to determine it. First-party Native, Matter, and ESPHome frontends use `frontend_firmware_version()` from their shared frontend code; this helper is not part of the SDK.
 
 `ESPECTRE_SDK_VERSION_STRING` identifies the SDK sources you compiled against. Use the component-wise `ESPECTRE_SDK_VERSION_AT_LEAST(major, minor, patch)` to guard code that needs a given release. `ESPECTRE_SDK_VERSION_NUMBER` retains the historical `MMmmpp` packing for compatibility and compact telemetry, but it is not an ordering contract because Semantic Versioning components are not limited to two digits.
 
@@ -240,39 +255,34 @@ The SDK is distributed and consumed as source. It does not promise a stable bina
 
 Everything reachable from `espectre_sdk.h` belongs to the stable runtime surface. `espectre_core_sdk.h` is a separate, explicit opt-in for custom capture pipelines: its detector classes and documented public methods follow the same source-compatibility rules, while feature trackers, generated weights, and other headers reached only as implementation dependencies are not independent extension points.
 
-First-party firmware, host tests, and CMake configuration resolve the string from `git describe` on numeric tags. The result is either the tag or a moving identity such as `<tag>-<commit-count>-g<hash>`. A checkout without usable Git history must pass `-DESPECTRE_GIT_VERSION=...` or set `ESPECTRE_GIT_VERSION`; ESPHome GitHub clones use this override.
+The SDK reads its identity only from `runtime/espectre_sdk_version.h` and explicit compiler definitions. It does not inspect Git, source refs, environment variables, or the application version. Published SDK bundles stamp the release identity into that header and `idf_component.yml`; the CI packaging tools determine the identity before producing the bundle.
 
-Published SDK bundles stamp the same identity into `espectre_sdk_version.h` and `idf_component.yml`, so an unpacked archive compiles without `.git`. The SDK manifest exposes that identity once as `version`; `release_tag` names the GitHub release that carries the assets and may differ for rolling channels. The generated API index keeps `sdk_version` because it identifies the source revision used to build that reference. There is no in-tree numeric fallback. Rolling GitHub tags remain `snapshot` for `preview` and `snapshot-dev` for `develop`. SDK identity is separate from `espectre_firmware_version()`, which reports the application version, and `ESPECTRE_PROTOCOL_VERSION`, which versions the wire format.
+Integrators can stamp the same header or override all four macros together: `ESPECTRE_SDK_VERSION_STRING`, `ESPECTRE_SDK_VERSION_MAJOR`, `ESPECTRE_SDK_VERSION_MINOR`, and `ESPECTRE_SDK_VERSION_PATCH`. A complete compiler override takes precedence over the packaged values. The string and numeric components must describe the same SDK release, and definitions must be consistent across the SDK and its consumers.
+
+Without a complete identity, the SDK uses `"0.0.0"` and zero for all numeric version components. Incomplete overrides also fall back to these values rather than mixing metadata from different sources or failing compilation. `espectre_sdk_version()` always returns a non-null string; `"0.0.0"` means the SDK version is unknown, and version guards for newer releases evaluate to false. A source checkout without stamped metadata therefore reports `"0.0.0"`, even if it has Git tags.
+
+The SDK manifest exposes the packaged identity once as `version`; `release_tag` names the GitHub release that carries the assets and may differ for rolling channels. The generated API index uses `sdk_version` to identify the source revision used to build that reference. Official release tooling still requires and validates the published version. Rolling GitHub tags remain `snapshot` for `preview` and `snapshot-dev` for `develop`. SDK identity is separate from the application version supplied by the integrator and `ESPECTRE_PROTOCOL_VERSION`, which versions the wire format.
 
 ## Build integration
 
 Both surfaces are distributed as source, but they compile different source sets.
 
 - **Core-only CMake**: include `src/cpp/espectre_sources.cmake`, compile `ESPECTRE_CORE_SOURCES`, and add `ESPECTRE_SHARED_INCLUDE_DIRS`. No ESP-IDF runtime sources are required.
-- **Full-runtime CMake / ESP-IDF**: compile `ESPECTRE_CORE_SOURCES` and `ESPECTRE_RUNTIME_ESP_IDF_SOURCES`, then add `ESPECTRE_RUNTIME_FRONTEND_SUPPORT_SOURCES` or the per-capability Direct HTTP, MQTT, provisioning, and OTA lists only when the integration uses them. Add `ESPECTRE_SHARED_INCLUDE_DIRS`; the frontend `CMakeLists.txt` files show working combinations.
+- **Full-runtime CMake / ESP-IDF**: compile `ESPECTRE_CORE_SOURCES` and `ESPECTRE_RUNTIME_ESP_IDF_SOURCES`, then add `ESPECTRE_RUNTIME_FRONTEND_SUPPORT_SOURCES` or the per-capability Direct HTTP, MQTT, and provisioning lists only when the integration uses them. Add `ESPECTRE_SHARED_INCLUDE_DIRS`; the frontend `CMakeLists.txt` files show working combinations.
 - **Vendored ESP-IDF component**: drop `src/cpp/` into your project's `components/` directory and add `espectre` to your own component's `REQUIRES`. The sensing runtime is always built; the optional groups are opt-in under the "ESPectre SDK" menuconfig menu.
 - **Toolchain**: C++17, ESP-IDF `>= 5.5` for the `runtime/esp_idf` services. Repository builds use ESP-IDF `5.5.5`.
 
-Source-list integrations must also resolve the SDK version and publish its compiler definitions to consumers of either facade. The vendored ESP-IDF component already handles this. A complete core-only target is:
+Source-list integrations and vendored ESP-IDF components use the version header directly; no version resolution step is required. A complete core-only target is:
 
 ```cmake
 set(ESPECTRE_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/espectre/src/cpp")
 include("${ESPECTRE_CPP_ROOT}/espectre_sources.cmake")
-include("${ESPECTRE_CPP_ROOT}/espectre_git_version.cmake")
 add_library(espectre_core STATIC ${ESPECTRE_CORE_SOURCES})
 target_compile_features(espectre_core PUBLIC cxx_std_17)
 target_include_directories(espectre_core PUBLIC ${ESPECTRE_SHARED_INCLUDE_DIRS})
-if(NOT ESPECTRE_GIT_VERSION_STAMPED)
-    target_compile_definitions(espectre_core PUBLIC
-        ESPECTRE_SDK_VERSION_STRING="${ESPECTRE_GIT_VERSION}"
-        ESPECTRE_SDK_VERSION_MAJOR=${ESPECTRE_SDK_VERSION_MAJOR}
-        ESPECTRE_SDK_VERSION_MINOR=${ESPECTRE_SDK_VERSION_MINOR}
-        ESPECTRE_SDK_VERSION_PATCH=${ESPECTRE_SDK_VERSION_PATCH}
-    )
-endif()
 ```
 
-Link the application target to `espectre_core` to inherit the includes, C++ standard, and version definitions. Adjust `ESPECTRE_CPP_ROOT` to the SDK's location. The version helper reads numeric Git tags or accepts `-DESPECTRE_GIT_VERSION=...`; a stamped bundle needs neither Git history nor extra version definitions. Apply the same version setup to a full-runtime source-list target.
+Link the application target to `espectre_core` to inherit the includes and C++ standard. Adjust `ESPECTRE_CPP_ROOT` to the SDK's location. If overriding the packaged SDK identity, apply all four version macros with `target_compile_definitions(espectre_core PUBLIC ...)` so consumers inherit them. The same approach works for a full-runtime source-list target.
 
 The shared component does not require ESP-IDF's `log` component. A product that registers an `esp_log` adapter declares that dependency in its own frontend or application component.
 
@@ -304,10 +314,9 @@ See [TUNING.md](TUNING.md) for how evaluation cadence, tick alignment, and hit f
 | `ESPECTRE_SDK_ENABLE_FRONTEND_SUPPORT` | `ESPECTRE_RUNTIME_FRONTEND_SUPPORT_SOURCES` | Shared bootstrap, control, sysinfo, and MQTT payload helpers | None beyond the base runtime |
 | `ESPECTRE_SDK_ENABLE_MQTT` | `ESPECTRE_RUNTIME_ESP_IDF_MQTT_SOURCES` | `EspIdfMqttTransport` over `esp-mqtt` | `mqtt` |
 | `ESPECTRE_SDK_ENABLE_PROVISIONING` | `ESPECTRE_RUNTIME_ESP_IDF_PROVISIONING_SOURCES` | Device config store and Wi-Fi provisioning | `improv` |
-| `ESPECTRE_SDK_ENABLE_OTA` | `ESPECTRE_RUNTIME_ESP_IDF_OTA_SOURCES` | `HttpsOtaService` | `app_update`, `esp_http_client`, `esp_https_ota`, and `esp-tls` |
 | `ESPECTRE_SDK_ENABLE_DIRECT` | `ESPECTRE_RUNTIME_ESP_IDF_DIRECT_SOURCES` | Direct HTTP, SSE, raw CSI streaming, peer discovery, and mDNS | `esp_http_server` and `mdns` |
 
-Each group is off by default, so a minimal integration does not link transport code it never calls. ESP-IDF resolves component requirements before menuconfig, so the vendored component declares every optional stack dependency up front; the source switches still control what reaches the firmware image. Its manifest resolves the pinned Improv revision and constrained Espressif mDNS component so provisioning and Direct builds work when selected; source-list integrations must declare those dependencies themselves. Implementing `IMqttTransport`, `IDirectHttpService`, or `IOtaService` yourself needs no group at all: the interfaces are header-only. `DirectHttpServiceConfig` keeps its generic Origin allowlist empty; `for_first_party_portals()` explicitly selects the official production and validation portals.
+Each group is off by default, so a minimal integration does not link transport code it never calls. ESP-IDF resolves component requirements before menuconfig, so the vendored component declares every optional stack dependency up front; the source switches still control what reaches the firmware image. Its manifest resolves the pinned Improv revision and constrained Espressif mDNS component so provisioning and Direct builds work when selected; source-list integrations must declare those dependencies themselves. Implementing `IMqttTransport` or `IDirectHttpService` yourself needs no group at all: the interfaces are header-only. `DirectHttpServiceConfig` keeps its generic Origin allowlist empty; `for_first_party_portals()` explicitly selects the official production and validation portals.
 
 ## Published SDK channels
 
@@ -330,7 +339,6 @@ Each SDK bundle includes:
 - `src/cpp/runtime/`
 - `src/cpp/runtime/esp_idf/espectre_config/`
 - `src/cpp/espectre_sources.cmake`
-- `src/cpp/espectre_git_version.cmake`
 - `src/cpp/CMakeLists.txt`
 - `src/cpp/idf_component.yml`
 - `src/cpp/Kconfig.projbuild`

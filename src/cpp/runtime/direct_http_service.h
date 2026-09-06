@@ -42,6 +42,8 @@ struct DirectHttpServiceConfig {
   uint16_t max_mutations_per_minute{60U};
   bool allow_missing_origin{false};
   bool allow_http_loopback_origins{false};
+  /** Optional frontend routes. The immutable catalog must outlive this service. */
+  const EspectreProtocolExtension *protocol_extension{nullptr};
 };
 
 struct DirectHttpServiceDiagnostics {

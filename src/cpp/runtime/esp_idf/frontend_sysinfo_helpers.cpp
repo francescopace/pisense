@@ -68,7 +68,6 @@ void append_sysinfo_protocol_lines(std::vector<std::string> *lines,
   append_bool_line(lines, "supports_traffic_control", capabilities.supports_traffic_control);
   append_bool_line(lines, "supports_live_telemetry", capabilities.supports_live_telemetry);
   append_bool_line(lines, "supports_extended_diagnostics", capabilities.supports_extended_diagnostics);
-  append_bool_line(lines, "supports_ota", capabilities.supports_ota);
   append_bool_line(lines, "supports_wifi_5ghz", capabilities.supports_wifi_5ghz);
 }
 

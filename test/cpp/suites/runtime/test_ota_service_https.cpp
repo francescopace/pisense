@@ -11,13 +11,45 @@
 #include <string>
 
 #define private public
-#include "ota_service_https.h"
+#include "frontend/ota_service_https.h"
 #undef private
 
 #include "esp_http_client.h"
 #include "esp_https_ota.h"
 
 using namespace espectre;
+
+class LegacyOtaService : public IOtaService {
+ public:
+  void loop() override {}
+  void shutdown() override {}
+  bool start_check(const std::string &) override {
+    check_calls++;
+    return true;
+  }
+  bool start_update(const std::string &) override {
+    update_calls++;
+    return true;
+  }
+  EspectreOtaStatus status() const override { return {}; }
+  void set_status_callback(StatusCallback) override {}
+  void set_prepare_for_update_callback(PrepareForUpdateCallback) override {}
+
+  int check_calls{0};
+  int update_calls{0};
+};
+
+void test_legacy_ota_service_rejects_channels_it_cannot_honor(void) {
+  LegacyOtaService service;
+  IOtaService &api = service;
+
+  TEST_ASSERT_TRUE(api.start_check("3.0.0", ""));
+  TEST_ASSERT_TRUE(api.start_update("3.0.0", ""));
+  TEST_ASSERT_FALSE(api.start_check("3.0.0", ESPECTRE_OTA_CHANNEL_PREVIEW));
+  TEST_ASSERT_FALSE(api.start_update("3.0.0", "invalid"));
+  TEST_ASSERT_EQUAL(1, service.check_calls);
+  TEST_ASSERT_EQUAL(1, service.update_calls);
+}
 
 void setUp(void) {
   esp_http_client_mock_reset();
@@ -247,6 +279,7 @@ void test_https_ota_fetch_releases_client_after_transport_error(void) {
 
 int process(void) {
   UNITY_BEGIN();
+  RUN_TEST(test_legacy_ota_service_rejects_channels_it_cannot_honor);
   RUN_TEST(test_https_ota_manifest_parser_selects_frontend_chip_and_ota_image);
   RUN_TEST(test_https_ota_manifest_parser_rejects_missing_or_ambiguous_targets);
   RUN_TEST(test_https_ota_manifest_parser_validates_catalog_metadata);

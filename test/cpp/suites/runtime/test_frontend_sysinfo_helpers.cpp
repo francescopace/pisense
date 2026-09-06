@@ -34,7 +34,6 @@ void test_frontend_sysinfo_builder_emits_shared_runtime_state(void) {
   base.capabilities.supports_traffic_control = true;
   base.capabilities.supports_live_telemetry = true;
   base.capabilities.supports_extended_diagnostics = true;
-  base.capabilities.supports_ota = true;
   base.capabilities.supports_wifi_5ghz = true;
   base.device_config.device_id = 0x112233445566ULL;
   base.device_config.device_label = "Kitchen";

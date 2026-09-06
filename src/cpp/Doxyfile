@@ -55,11 +55,10 @@ INPUT                  = src/cpp/espectre_sdk.h \
                          src/cpp/runtime/runtime_diagnostics.h \
                          src/cpp/runtime/csi_traffic_types.h \
                          src/cpp/runtime/espectre_protocol.h \
+                         src/cpp/runtime/protocol_json.h \
                          src/cpp/runtime/mqtt_transport.h \
                          src/cpp/runtime/direct_http_protocol.h \
                          src/cpp/runtime/direct_http_service.h \
-                         src/cpp/runtime/ota_service.h \
-                         src/cpp/runtime/firmware_version.h \
                          src/cpp/runtime/esp_idf/device_identity.h \
                          src/cpp/runtime/esp_idf/runtime_frontend_controller.h \
                          src/cpp/runtime/esp_idf/runtime_sensing_kconfig.h \

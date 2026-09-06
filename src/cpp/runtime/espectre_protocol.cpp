@@ -1,7 +1,7 @@
 /*
  * ESPectre - ESPectre Protocol
  *
- * Shared device, command, and OTA protocol types used by frontend
+ * Shared device and extensible command protocol types used by frontend
  * transports.
  *
  * Author: Francesco Pace <francesco.pace@gmail.com>
@@ -25,54 +25,52 @@
 #include "raw_csi.h"
 #include "runtime_diagnostics.h"
 #include "runtime_sensing_schema.h"
+#include "runtime_config_utils.h"
 
 namespace espectre {
 
 namespace {
 
+bool validate_sdk_command_parameters(const std::vector<JsonObjectField> &fields,
+                                     EspectreCommand *command, std::string *error);
+
 constexpr EspectreApiRoute kApiRoutes[] = {
     {"GET", "/espectre/v1/health", "health", "health", EspectreDirectMethod::STATUS,
-     EspectreApiRouteKind::RESOURCE, false},
+     EspectreApiRouteKind::RESOURCE, false, validate_sdk_command_parameters},
     {"GET", "/espectre/v1/device", "device", "device", EspectreDirectMethod::INFO,
-     EspectreApiRouteKind::RESOURCE, false},
+     EspectreApiRouteKind::RESOURCE, false, validate_sdk_command_parameters},
     {"GET", "/espectre/v1/capabilities", "capabilities", "capabilities",
-     EspectreDirectMethod::CAPABILITIES, EspectreApiRouteKind::RESOURCE, false},
+     EspectreDirectMethod::CAPABILITIES, EspectreApiRouteKind::RESOURCE, false, validate_sdk_command_parameters},
     {"GET", "/espectre/v1/sensing", "sensing", "sensing", EspectreDirectMethod::CONFIG,
-     EspectreApiRouteKind::RESOURCE, false},
+     EspectreApiRouteKind::RESOURCE, false, validate_sdk_command_parameters},
     {"GET", "/espectre/v1/wifi", "wifi", "wifi", EspectreDirectMethod::CONFIG,
-     EspectreApiRouteKind::RESOURCE, false},
+     EspectreApiRouteKind::RESOURCE, false, validate_sdk_command_parameters},
     {"GET", "/espectre/v1/wifi/access-points", "wifi/access-points", "wifi_access_points",
-     EspectreDirectMethod::WIFI_ACCESS_POINTS, EspectreApiRouteKind::RESOURCE, false},
+     EspectreDirectMethod::WIFI_ACCESS_POINTS, EspectreApiRouteKind::RESOURCE, false, validate_sdk_command_parameters},
     {"GET", "/espectre/v1/mqtt", "mqtt", "mqtt", EspectreDirectMethod::CONFIG,
-     EspectreApiRouteKind::RESOURCE, false},
-    {"GET", "/espectre/v1/ota", "ota", "ota", EspectreDirectMethod::OTA_STATUS,
-     EspectreApiRouteKind::RESOURCE, false},
+     EspectreApiRouteKind::RESOURCE, false, validate_sdk_command_parameters},
     {"GET", "/espectre/v1/diagnostics", "diagnostics", "read_diagnostics",
-     EspectreDirectMethod::DIAGNOSTICS, EspectreApiRouteKind::RESOURCE, false},
+     EspectreDirectMethod::DIAGNOSTICS, EspectreApiRouteKind::RESOURCE, false, validate_sdk_command_parameters},
     {"GET", "/espectre/v1/devices", "devices", "devices", EspectreDirectMethod::DISCOVER_PEERS,
-     EspectreApiRouteKind::RESOURCE, false},
+     EspectreApiRouteKind::RESOURCE, false, validate_sdk_command_parameters},
     {"PATCH", "/espectre/v1/device", "update_device", "update_device",
-     EspectreDirectMethod::SET_DEVICE_LABEL, EspectreApiRouteKind::OPERATION, false},
+     EspectreDirectMethod::SET_DEVICE_LABEL, EspectreApiRouteKind::OPERATION, false, validate_sdk_command_parameters},
     {"PATCH", "/espectre/v1/sensing", "update_sensing", "update_sensing",
-     EspectreDirectMethod::SET_SENSING, EspectreApiRouteKind::OPERATION, false},
+     EspectreDirectMethod::SET_SENSING, EspectreApiRouteKind::OPERATION, false, validate_sdk_command_parameters},
     {"PATCH", "/espectre/v1/mqtt", "update_mqtt", "update_mqtt",
-     EspectreDirectMethod::SET_MQTT_CONFIG, EspectreApiRouteKind::OPERATION, false},
+     EspectreDirectMethod::SET_MQTT_CONFIG, EspectreApiRouteKind::OPERATION, false, validate_sdk_command_parameters},
     {"POST", "/espectre/v1/sensing/calibrations", "recalibrate", "recalibrate",
-     EspectreDirectMethod::RECALIBRATE, EspectreApiRouteKind::OPERATION, true},
+     EspectreDirectMethod::RECALIBRATE, EspectreApiRouteKind::OPERATION, true, validate_sdk_command_parameters},
     {"POST", "/espectre/v1/wifi/scans", "scan_wifi", "scan_wifi",
-     EspectreDirectMethod::SCAN_WIFI_ACCESS_POINTS, EspectreApiRouteKind::OPERATION, true},
-    {"POST", "/espectre/v1/ota/checks", "check_ota", "check_ota",
-     EspectreDirectMethod::OTA_CHECK, EspectreApiRouteKind::OPERATION, true},
-    {"POST", "/espectre/v1/ota/updates", "start_ota", "start_ota",
-     EspectreDirectMethod::OTA_START, EspectreApiRouteKind::OPERATION, true},
+     EspectreDirectMethod::SCAN_WIFI_ACCESS_POINTS, EspectreApiRouteKind::OPERATION, true, validate_sdk_command_parameters},
     {"PUT", "/espectre/v1/wifi/bssid", "set_wifi_bssid", "set_wifi_bssid",
-     EspectreDirectMethod::SET_WIFI_BSSID, EspectreApiRouteKind::OPERATION, true},
+     EspectreDirectMethod::SET_WIFI_BSSID, EspectreApiRouteKind::OPERATION, true, validate_sdk_command_parameters},
     {"DELETE", "/espectre/v1/wifi/bssid", "clear_wifi_bssid", "clear_wifi_bssid",
-     EspectreDirectMethod::CLEAR_WIFI_BSSID, EspectreApiRouteKind::OPERATION, true},
+     EspectreDirectMethod::CLEAR_WIFI_BSSID, EspectreApiRouteKind::OPERATION, true, validate_sdk_command_parameters},
     {"DELETE", "/espectre/v1/wifi/credentials", "clear_wifi_credentials", "clear_wifi_credentials",
-     EspectreDirectMethod::CLEAR_WIFI_CONFIG, EspectreApiRouteKind::OPERATION, true},
+     EspectreDirectMethod::CLEAR_WIFI_CONFIG, EspectreApiRouteKind::OPERATION, true, validate_sdk_command_parameters},
     {"DELETE", "/espectre/v1/mqtt", "clear_mqtt", "clear_mqtt",
-     EspectreDirectMethod::CLEAR_MQTT_CONFIG, EspectreApiRouteKind::OPERATION, false},
+     EspectreDirectMethod::CLEAR_MQTT_CONFIG, EspectreApiRouteKind::OPERATION, false, validate_sdk_command_parameters},
     {"GET", "/espectre/v1/events", "events", "", EspectreDirectMethod::STATUS,
      EspectreApiRouteKind::STREAM, false},
     {"GET", "/espectre/v1/csi", "csi", "", EspectreDirectMethod::START_RAW_STREAM,
@@ -85,7 +83,6 @@ constexpr EspectreApiEventDescriptor kApiEvents[] = {
     {"device", EspectreEvent::INFO, EspectreDirectMethod::INFO},
     {"sensing", EspectreEvent::CONFIG, EspectreDirectMethod::CONFIG},
     {"wifi", EspectreEvent::CONFIG, EspectreDirectMethod::WIFI_ACCESS_POINTS},
-    {"ota", EspectreEvent::OTA_STATUS, EspectreDirectMethod::OTA_STATUS},
     {"fault", EspectreEvent::FAULT, EspectreDirectMethod::STATUS},
 };
 
@@ -99,6 +96,58 @@ const EspectreApiRoute *espectre_api_routes(size_t *count) {
 const EspectreApiEventDescriptor *espectre_api_events(size_t *count) {
   if (count != nullptr) *count = sizeof(kApiEvents) / sizeof(kApiEvents[0]);
   return kApiEvents;
+}
+
+bool validate_protocol_extension(const EspectreProtocolExtension &extension, std::string *error) {
+  const auto reject = [error]() {
+    if (error != nullptr) *error = "invalid or conflicting protocol extension";
+    return false;
+  };
+  const auto identifier = [](const char *text, bool path) {
+    if (text == nullptr || text[0] == '\0') return false;
+    for (const unsigned char *ch = reinterpret_cast<const unsigned char *>(text); *ch; ++ch) {
+      if (!std::isalnum(*ch) && *ch != '_' && !(path && (*ch == '/' || *ch == '-'))) return false;
+    }
+    return true;
+  };
+  for (size_t index = 0; index < extension.routes.size(); ++index) {
+    const auto &route = extension.routes[index];
+    if (route.http_method == nullptr || route.path == nullptr || route.validate == nullptr ||
+        !identifier(route.command, false) || !identifier(route.name, true) ||
+        !identifier(route.path, true) || std::string(route.path).rfind("/espectre/v1/", 0) != 0) return reject();
+    const std::string method = route.http_method;
+    if ((route.kind == EspectreApiRouteKind::RESOURCE && method != "GET") ||
+        (route.kind == EspectreApiRouteKind::OPERATION && method != "POST" && method != "PUT" &&
+         method != "PATCH" && method != "DELETE") ||
+        (route.kind != EspectreApiRouteKind::RESOURCE && route.kind != EspectreApiRouteKind::OPERATION)) return reject();
+    for (const auto &base : kApiRoutes) {
+      if (std::string(route.path) == base.path || std::string(route.command) == base.command ||
+          std::string(route.name) == base.name) return reject();
+    }
+    for (size_t previous = 0; previous < index; ++previous) {
+      const auto &other = extension.routes[previous];
+      if ((method == other.http_method && std::string(route.path) == other.path) ||
+          std::string(route.command) == other.command || std::string(route.name) == other.name) return reject();
+    }
+  }
+  for (size_t index = 0; index < extension.events.size(); ++index) {
+    const auto &event = extension.events[index];
+    if (!identifier(event.c_str(), false)) return reject();
+    for (const auto &base : kApiEvents) if (event == base.name) return reject();
+    for (size_t previous = 0; previous < index; ++previous) {
+      if (event == extension.events[previous]) return reject();
+    }
+  }
+  return true;
+}
+
+const EspectreExtensionRoute *find_extension_route(const EspectreProtocolExtension *extension,
+                                                 const std::string &command) {
+  if (extension == nullptr || !validate_protocol_extension(*extension)) return nullptr;
+  for (const auto &route : extension->routes) {
+    if (command == route.command) return &route;
+  }
+  return nullptr;
 }
 
 namespace {
@@ -157,9 +206,10 @@ bool api_route_supported(const EspectreApiRoute &route,
   return capabilities.supports(route.capability);
 }
 
+template <typename Route>
 void append_operation_descriptor(std::string *out,
                                  bool *first,
-                                 const EspectreApiRoute &route,
+                                 const Route &route,
                                  const char *name = nullptr) {
   if (out == nullptr || first == nullptr) {
     return;
@@ -194,6 +244,11 @@ void append_capability_commands(std::string *out,
         api_route_supported(route, capabilities)) {
       append_operation_descriptor(out, &first, route,
                                   correlated_diagnostics ? route.command : nullptr);
+    }
+  }
+  if (capabilities.extension != nullptr && validate_protocol_extension(*capabilities.extension)) {
+    for (const auto &route : capabilities.extension->routes) {
+      if (route.kind == EspectreApiRouteKind::OPERATION) append_operation_descriptor(out, &first, route);
     }
   }
 }
@@ -257,28 +312,6 @@ std::string normalize_chip_label(const char *chip) {
   return normalized.empty() ? "UNK" : normalized;
 }
 
-const char *ota_state_name(EspectreOtaState state) {
-  switch (state) {
-    case EspectreOtaState::IDLE:
-      return "idle";
-    case EspectreOtaState::CHECKING:
-      return "checking";
-    case EspectreOtaState::UPDATE_AVAILABLE:
-      return "update_available";
-    case EspectreOtaState::UP_TO_DATE:
-      return "up_to_date";
-    case EspectreOtaState::DOWNLOADING:
-      return "downloading";
-    case EspectreOtaState::APPLYING:
-      return "applying";
-    case EspectreOtaState::REBOOT_SCHEDULED:
-      return "reboot_scheduled";
-    case EspectreOtaState::ERROR:
-      return "error";
-    default:
-      return "unknown";
-  }
-}
 
 bool assign_config_field(const std::string &field, const std::string &value, EspectreDeviceConfig *config) {
   if (field == "device_label") {
@@ -446,24 +479,11 @@ bool bssid_string_accepted(const std::string &value) {
   return true;
 }
 
-bool parse_command_fields(const std::string &command_id,
-                          const std::string &command_name,
-                          const std::vector<JsonObjectField> &fields,
-                          EspectreCommand *command,
-                          std::string *error) {
-  if (command == nullptr) {
-    if (error != nullptr) {
-      *error = "command output is required";
-    }
-    return false;
-  }
-  EspectreCommand parsed;
-  parsed.command_id = command_id;
-  parsed.command = command_name;
+bool validate_sdk_command_parameters(const std::vector<JsonObjectField> &fields,
+                                     EspectreCommand *command, std::string *error) {
+  EspectreCommand parsed = *command;
   const auto reject = [&](const char *message) {
-    if (error != nullptr) {
-      *error = message;
-    }
+    if (error != nullptr) *error = message;
     *command = parsed;
     return false;
   };
@@ -492,9 +512,6 @@ bool parse_command_fields(const std::string &command_id,
     return true;
   };
 
-  if (parsed.command.empty()) {
-    return reject("missing command");
-  }
   const auto field_allowed = [&parsed](const std::string &name) {
     if (name == "command_id" || name == "command") return true;
     if (parsed.command == "update_sensing") {
@@ -507,9 +524,6 @@ bool parse_command_fields(const std::string &command_id,
     if (parsed.command == "update_mqtt") {
       return name == "scheme" || name == "host" || name == "port" ||
              name == "username" || name == "password" || name == "topic_prefix";
-    }
-    if (parsed.command == "check_ota" || parsed.command == "start_ota") {
-      return name == "channel" || name == "manifest_url" || name == "image_url" || name == "version";
     }
     return false;
   };
@@ -525,7 +539,8 @@ bool parse_command_fields(const std::string &command_id,
     }
     if (find_json_object_field(fields, "threshold") != nullptr) {
       std::string token;
-      if (!number_field("threshold", &token) || !parse_float_value(token, &parsed.threshold)) {
+      if (!number_field("threshold", &token) || !parse_float_value(token, &parsed.threshold) ||
+          !validate_runtime_threshold(parsed.threshold)) {
         return reject("invalid threshold (accepted: 0.0-1.0)");
       }
       parsed.has_threshold = true;
@@ -538,7 +553,9 @@ bool parse_command_fields(const std::string &command_id,
       std::string off_token;
       if (!number_field("motion_on_hits", &on_token) || !number_field("motion_off_hits", &off_token) ||
           !parse_uint8_value(on_token, &parsed.motion_on_hits) ||
-          !parse_uint8_value(off_token, &parsed.motion_off_hits)) {
+          !parse_uint8_value(off_token, &parsed.motion_off_hits) ||
+          parsed.motion_on_hits < RUNTIME_MOTION_HITS_MIN || parsed.motion_on_hits > RUNTIME_MOTION_HITS_MAX ||
+          parsed.motion_off_hits < RUNTIME_MOTION_HITS_MIN || parsed.motion_off_hits > RUNTIME_MOTION_HITS_MAX) {
         return reject("invalid motion hits (accepted: motion_on_hits and motion_off_hits in 1-20)");
       }
       parsed.has_motion_hits = true;
@@ -637,19 +654,7 @@ bool parse_command_fields(const std::string &command_id,
   } else if (parsed.command == "recalibrate" || parsed.command == "scan_wifi" ||
              parsed.command == "clear_wifi_bssid") {
     // No additional payload required.
-  } else if (parsed.command == "check_ota" || parsed.command == "start_ota") {
-    if (find_json_object_field(fields, "manifest_url") != nullptr ||
-        find_json_object_field(fields, "image_url") != nullptr ||
-        find_json_object_field(fields, "version") != nullptr) {
-      return reject("ota overrides are not supported (manifest_url, image_url, and version are not accepted)");
-    }
-    if (find_json_object_field(fields, "channel") != nullptr) {
-      if (!string_field("channel", &parsed.ota_channel) || !espectre_ota_channel_accepted(parsed.ota_channel)) {
-        return reject("invalid ota channel (accepted: release, preview, and develop)");
-      }
-      parsed.has_ota_channel = true;
-    }
-  } else if (parsed.command == "ota" || parsed.command == "device" ||
+  } else if (parsed.command == "device" ||
              parsed.command == "capabilities" || parsed.command == "health" ||
              parsed.command == "sensing" || parsed.command == "wifi" ||
              parsed.command == "mqtt" ||
@@ -663,6 +668,40 @@ bool parse_command_fields(const std::string &command_id,
   }
   *command = std::move(parsed);
   return true;
+}
+
+bool parse_command_fields(const std::string &command_id,
+                          const std::string &command_name,
+                          const std::vector<JsonObjectField> &fields,
+                          const std::string &parameters,
+                          const EspectreProtocolExtension *extension,
+                          EspectreCommand *command,
+                          std::string *error) {
+  if (command == nullptr) {
+    if (error != nullptr) *error = "command output is required";
+    return false;
+  }
+  *command = EspectreCommand{};
+  command->command_id = command_id;
+  command->command = command_name;
+  if (command_name.empty()) {
+    if (error != nullptr) *error = "missing command";
+    return false;
+  }
+  // Unknown commands retain the existing unsupported-command dispatch contract.
+  EspectreCommandValidator validator = validate_sdk_command_parameters;
+  if (const auto *route = find_extension_route(extension, command_name)) {
+    command->extension_parameters = parameters;
+    validator = route->validate;
+  } else {
+    for (const auto &route : kApiRoutes) {
+      if (command_name == route.command) {
+        validator = route.validate;
+        break;
+      }
+    }
+  }
+  return validator(fields, command, error);
 }
 
 }  // namespace
@@ -719,7 +758,6 @@ std::string espectre_effective_device_label(const EspectreDeviceConfig &config) 
 
 EspectreDeviceInfo normalize_protocol_device_info(const EspectreDeviceInfo &info,
                                                   const RuntimeSnapshot *snapshot,
-                                                  bool supports_ota,
                                                   const char *default_frontend,
                                                   const char *default_chip) {
   EspectreDeviceInfo normalized = info;
@@ -727,7 +765,6 @@ EspectreDeviceInfo normalize_protocol_device_info(const EspectreDeviceInfo &info
       normalized.frontend.empty() ? (default_frontend != nullptr ? default_frontend : "native") : normalized.frontend;
   normalized.firmware_version = normalized.firmware_version.empty() ? "unknown" : normalized.firmware_version;
   normalized.chip = normalized.chip.empty() ? (default_chip != nullptr ? default_chip : "unknown") : normalized.chip;
-  normalized.supports_ota = supports_ota;
   if (normalized.detector.empty() && snapshot != nullptr && snapshot->detector_name != nullptr) {
     normalized.detector = snapshot->detector_name;
   }
@@ -852,16 +889,21 @@ std::string espectre_capabilities_payload(const EspectreDeviceConfig &config,
   const EspectreApiEventDescriptor *events = espectre_api_events(&event_count);
   for (size_t index = 0U; index < event_count; ++index) {
     const EspectreApiEventDescriptor &event = events[index];
-    const bool supported_ota_event =
-        event.event == EspectreEvent::OTA_STATUS &&
-        capabilities.supports(EspectreDirectMethod::OTA_STATUS);
-    if ((!capabilities.publishes(event.event) && !supported_ota_event) ||
+    if (!capabilities.publishes(event.event) ||
         !capabilities.supports(event.capability)) {
       continue;
     }
     if (!first_event) out += ',';
     append_json_string(&out, event.name);
     first_event = false;
+  }
+
+  if (capabilities.extension != nullptr && validate_protocol_extension(*capabilities.extension)) {
+    for (const auto &event : capabilities.extension->events) {
+      if (!first_event) out += ',';
+      append_json_string(&out, event.c_str());
+      first_event = false;
+    }
   }
   out += "],\"resources\":[";
   bool first_resource = true;
@@ -876,6 +918,15 @@ std::string espectre_capabilities_payload(const EspectreDeviceConfig &config,
     if (!first_resource) out += ',';
     append_json_string(&out, route.name);
     first_resource = false;
+  }
+
+  if (capabilities.extension != nullptr && validate_protocol_extension(*capabilities.extension)) {
+    for (const auto &route : capabilities.extension->routes) {
+      if (route.kind != EspectreApiRouteKind::RESOURCE) continue;
+      if (!first_resource) out += ',';
+      append_json_string(&out, route.name);
+      first_resource = false;
+    }
   }
   const bool supports_raw_csi =
       capabilities.supports(EspectreDirectMethod::START_RAW_STREAM) &&
@@ -910,8 +961,10 @@ std::string espectre_capabilities_payload(const EspectreDeviceConfig &config,
                                           bool supports_wifi_bssid,
                                           bool supports_mqtt_config,
                                           bool supports_peer_discovery,
-                                          bool supports_raw_csi) {
+                                          bool supports_raw_csi,
+                                          const EspectreProtocolExtension *extension) {
   EspectreCapabilityProfile capabilities;
+  capabilities.extension = extension;
   using Method = EspectreDirectMethod;
   capabilities.set(Method::CAPABILITIES);
   capabilities.set(Method::INFO, info.supports_info);
@@ -933,13 +986,9 @@ std::string espectre_capabilities_payload(const EspectreDeviceConfig &config,
   capabilities.set(Method::CLEAR_WIFI_CONFIG, supports_wifi_bssid);
   capabilities.set(Method::SET_MQTT_CONFIG, supports_mqtt_config);
   capabilities.set(Method::CLEAR_MQTT_CONFIG, supports_mqtt_config);
-  capabilities.set(Method::OTA_STATUS, info.supports_ota);
-  capabilities.set(Method::OTA_CHECK, info.supports_ota);
-  capabilities.set(Method::OTA_START, info.supports_ota);
   capabilities.set(Method::DISCOVER_PEERS, supports_peer_discovery);
   capabilities.set(Method::START_RAW_STREAM, supports_raw_csi);
   capabilities.set(Method::STOP_RAW_STREAM, supports_raw_csi);
-  capabilities.set(EspectreEvent::OTA_STATUS, info.supports_ota);
   // The compatibility overload historically reported the runtime section even
   // when callers hid the config command.
   capabilities.set(EspectreConfigSection::RUNTIME);
@@ -1079,7 +1128,7 @@ std::string espectre_fault_payload(const EspectreDeviceConfig &config,
   return out;
 }
 
-std::string espectre_message_catalog_payload() {
+std::string espectre_message_catalog_payload(const EspectreProtocolExtension *extension) {
   EspectreDeviceConfig config;
   EspectreCommand command;
   command.command_id = "contract-1";
@@ -1103,8 +1152,14 @@ std::string espectre_message_catalog_payload() {
   out += ",\"error\":";
   out += espectre_command_result_payload(config, command, false, "invalid_params",
                                          "threshold is invalid");
-  out += ",\"events\":{\"names\":[\"motion\",\"health\",\"device\",\"sensing\","
-         "\"ota\",\"fault\"],\"health\":";
+  out += ",\"events\":{\"names\":[\"motion\",\"health\",\"device\",\"sensing\"";
+  if (extension != nullptr && validate_protocol_extension(*extension)) {
+    for (const auto &event : extension->events) {
+      out += ',';
+      append_json_string(&out, event.c_str());
+    }
+  }
+  out += ",\"fault\"],\"health\":";
   out += espectre_health_payload(config, true, 1000U);
   out += ",\"motion\":";
   out += espectre_motion_payload(config, snapshot, 1000U, 1U, "micro");
@@ -1114,34 +1169,9 @@ std::string espectre_message_catalog_payload() {
   return out;
 }
 
-std::string espectre_ota_status_payload(const EspectreDeviceConfig &config,
-                                    const EspectreOtaStatus &status,
-                                    uint32_t timestamp_ms) {
-  (void) config;
-  std::string out;
-  out.reserve(192U + status.current_version.size() + status.target_version.size() +
-              status.manifest_url.size() + status.image_url.size() + status.message.size() +
-              status.default_channel.size() + status.channel.size());
-  out = "{";
-  append_json_pair(&out, "state", ota_state_name(status.state), true);
-  out += ",\"timestamp_ms\":";
-  out += std::to_string(static_cast<unsigned>(timestamp_ms));
-  out += ",\"busy\":";
-  out += status.busy ? "true" : "false";
-  out += ",\"update_available\":";
-  out += status.update_available ? "true" : "false";
-  append_json_pair(&out, "current_version", status.current_version.empty() ? "unknown" : status.current_version.c_str());
-  append_json_pair(&out, "target_version", status.target_version.c_str());
-  append_json_pair(&out, "manifest_url", status.manifest_url.c_str());
-  append_json_pair(&out, "image_url", status.image_url.c_str());
-  append_json_pair(&out, "default_channel", status.default_channel.c_str());
-  append_json_pair(&out, "channel", status.channel.c_str());
-  append_json_pair(&out, "message", status.message.c_str());
-  out += "}";
-  return out;
-}
 
-bool parse_espectre_command(const std::string &payload, EspectreCommand *command, std::string *error) {
+bool parse_espectre_command(const std::string &payload, EspectreCommand *command, std::string *error,
+                            const EspectreProtocolExtension *extension) {
   if (command == nullptr) {
     if (error != nullptr) {
       *error = "command output is required";
@@ -1184,7 +1214,7 @@ bool parse_espectre_command(const std::string &payload, EspectreCommand *command
     command->command_id = std::move(command_id);
     return false;
   }
-  return parse_command_fields(command_id, command_field->value, fields, command, error);
+  return parse_command_fields(command_id, command_field->value, fields, payload, extension, command, error);
 }
 
 bool parse_espectre_command_request(const std::string &command_id,
@@ -1192,7 +1222,8 @@ bool parse_espectre_command_request(const std::string &command_id,
                                     const std::string &params_json,
                                     EspectreCommand *command,
                                     std::string *error,
-                                    const std::string &protocol_version) {
+                                    const std::string &protocol_version,
+                                    const EspectreProtocolExtension *extension) {
   if (!command_id.empty() && !command_id_accepted(command_id)) {
     if (error != nullptr) {
       *error = "invalid command_id (accepted: non-empty string up to 64 characters)";
@@ -1226,33 +1257,10 @@ bool parse_espectre_command_request(const std::string &command_id,
     }
     return false;
   }
-  return parse_command_fields(command_id, command_name, fields, command, error);
+  return parse_command_fields(command_id, command_name, fields, params_json, extension, command, error);
 }
 
-bool espectre_ota_channel_accepted(const std::string &channel) {
-  return channel == ESPECTRE_OTA_CHANNEL_RELEASE || channel == ESPECTRE_OTA_CHANNEL_PREVIEW ||
-         channel == ESPECTRE_OTA_CHANNEL_DEVELOP;
-}
 
-std::string espectre_ota_manifest_url(const char *frontend, const char *chip, const std::string &channel) {
-  if (frontend == nullptr || frontend[0] == '\0' || chip == nullptr || chip[0] == '\0' ||
-      !espectre_ota_channel_accepted(channel)) {
-    return {};
-  }
-  std::string url = "https://github.com/francescopace/espectre/releases/";
-  if (channel == ESPECTRE_OTA_CHANNEL_RELEASE) {
-    url += "latest/download/";
-  } else {
-    url += "download/";
-    url += (channel == ESPECTRE_OTA_CHANNEL_PREVIEW) ? ESPECTRE_OTA_RELEASE_TAG_PREVIEW
-                                                     : ESPECTRE_OTA_RELEASE_TAG_DEVELOP;
-    url += "/";
-  }
-  url += "firmware-manifest-";
-  url += channel;
-  url += ".json";
-  return url;
-}
 
 bool parse_espectre_config_command(const std::string &command, EspectreDeviceConfig *config, std::string *error) {
   if (config == nullptr) {

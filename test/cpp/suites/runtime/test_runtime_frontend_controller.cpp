@@ -474,7 +474,7 @@ void test_runtime_frontend_controller_applies_armed_state_staged_during_raw_coll
   TEST_ASSERT_FALSE(frontend_runtime_shim::state.services_armed);
 }
 
-void test_runtime_frontend_controller_quiesces_raw_collection_for_ota(void) {
+void test_runtime_frontend_controller_quiesces_raw_collection(void) {
   RuntimeFrontendController controller;
   DummyRuntimeListener listener;
   frontend_runtime_shim::state.capabilities.supports_raw_csi = true;
@@ -482,7 +482,7 @@ void test_runtime_frontend_controller_quiesces_raw_collection_for_ota(void) {
   TEST_ASSERT_TRUE(controller.start_raw_collection(
       [](void *, const RawCsiPacketView &) { return true; }, nullptr));
 
-  controller.quiesce_for_ota();
+  controller.quiesce();
 
   TEST_ASSERT_EQUAL(RuntimeOperationState::SENSING, controller.operation_state());
   TEST_ASSERT_FALSE(controller.services_armed());
@@ -570,7 +570,7 @@ int process(void) {
   RUN_TEST(test_runtime_frontend_controller_recalibration_requires_capability_and_runtime);
   RUN_TEST(test_runtime_frontend_controller_refreshes_snapshot_across_raw_collection);
   RUN_TEST(test_runtime_frontend_controller_applies_armed_state_staged_during_raw_collection);
-  RUN_TEST(test_runtime_frontend_controller_quiesces_raw_collection_for_ota);
+  RUN_TEST(test_runtime_frontend_controller_quiesces_raw_collection);
   RUN_TEST(test_runtime_frontend_controller_caches_and_forwards_listener_events);
   RUN_TEST(test_runtime_frontend_controller_defers_shutdown_requested_by_listener);
   RUN_TEST(test_runtime_frontend_controller_switches_detector_and_resets_threshold);

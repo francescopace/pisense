@@ -63,11 +63,6 @@ def parse_args() -> argparse.Namespace:
         "--compliance-url-prefix",
         help="Optional URL prefix used for compliance artifacts independently of firmware images",
     )
-    # Snapshot can run the workflow from main with a newer builder from develop.
-    parser.add_argument(
-        "--native-ota-manifest-dir",
-        help="Deprecated and ignored; Native OTA images use the shared firmware manifest",
-    )
     parser.add_argument(
         "--require-complete-matrix",
         action="store_true",

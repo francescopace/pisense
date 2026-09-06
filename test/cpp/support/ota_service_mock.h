@@ -11,7 +11,7 @@
 
 #include <string>
 
-#include "ota_service.h"
+#include "frontend/ota_service.h"
 
 namespace espectre {
 namespace ota_service_mock {

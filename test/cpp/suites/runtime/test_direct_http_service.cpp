@@ -459,6 +459,59 @@ void test_post_distinguishes_queue_saturation_from_mutation_rate_limit() {
   TEST_ASSERT_EQUAL(1U, service.diagnostics().rate_limited_requests);
 }
 
+void test_frontend_routes_obey_read_mutation_and_raw_collection_policies() {
+  httpd_mock_reset();
+  esp_timer_mock::reset(100000U, 0U);
+  const auto validate = +[](const std::vector<JsonObjectField> &, EspectreCommand *, std::string *) { return true; };
+  const EspectreProtocolExtension extension{
+      {
+          {"GET", "/espectre/v1/vendor", "vendor", "vendor", EspectreApiRouteKind::RESOURCE,
+           false, false, true, validate},
+          {"POST", "/espectre/v1/vendor/actions", "vendor_action", "vendor_action",
+           EspectreApiRouteKind::OPERATION, true, true, false, validate},
+      }, {"vendor_done"}};
+  DirectHttpServiceConfig limits = config();
+  limits.protocol_extension = &extension;
+  limits.max_mutations_per_minute = 1U;
+  EspIdfDirectHttpService service;
+  size_t executed = 0U;
+  TEST_ASSERT_TRUE(service.setup(limits, [&executed](const DirectRequest &request) {
+    ++executed;
+    return command_result(request);
+  }, {}));
+
+  RawCsiSessionConfig session{};
+  session.session_id[0] = 1U;
+  TEST_ASSERT_TRUE(service.start_raw_session(session, {}));
+  prepare_json("{}");
+  httpd_req_t read = request_for_route(HTTP_GET, "/espectre/v1/vendor");
+  TEST_ASSERT_EQUAL(ESP_OK, dispatch_request(&read));
+  service.loop();
+  TEST_ASSERT_EQUAL(1U, executed);
+
+  prepare_json("{}");
+  httpd_req_t action = request_for_route(HTTP_POST, "/espectre/v1/vendor/actions");
+  TEST_ASSERT_EQUAL(ESP_FAIL, dispatch_request(&action));
+  TEST_ASSERT_EQUAL_STRING("409 Conflict", g_httpd_mock.response_status);
+  TEST_ASSERT_EQUAL(1U, executed);
+  TEST_ASSERT_TRUE(service.stop_raw_session(RawCsiStopReason::REQUESTED));
+
+  prepare_json("{}");
+  action = request_for_route(HTTP_POST, "/espectre/v1/vendor/actions");
+  TEST_ASSERT_EQUAL(ESP_OK, dispatch_request(&action));
+  service.loop();
+  TEST_ASSERT_EQUAL(2U, executed);
+  prepare_json("{}");
+  action = request_for_route(HTTP_POST, "/espectre/v1/vendor/actions");
+  TEST_ASSERT_EQUAL(ESP_FAIL, dispatch_request(&action));
+  TEST_ASSERT_EQUAL_STRING(HTTPD_429_TOO_MANY_REQUESTS, g_httpd_mock.response_status);
+  prepare_json("{}");
+  read = request_for_route(HTTP_GET, "/espectre/v1/vendor");
+  TEST_ASSERT_EQUAL(ESP_OK, dispatch_request(&read));
+  service.loop();
+  TEST_ASSERT_EQUAL(3U, executed);
+}
+
 void test_post_limits_total_request_rate_before_parsing() {
   httpd_mock_reset();
   esp_timer_mock::reset(100000U, 0U);
@@ -975,6 +1028,7 @@ int main() {
   RUN_TEST(test_options_returns_private_network_cors_headers);
   RUN_TEST(test_post_distinguishes_queue_saturation_from_mutation_rate_limit);
   RUN_TEST(test_post_limits_total_request_rate_before_parsing);
+  RUN_TEST(test_frontend_routes_obey_read_mutation_and_raw_collection_policies);
   RUN_TEST(test_sse_limits_clients_frames_events_coalesces_and_heartbeats);
   RUN_TEST(test_sse_peer_close_is_not_a_send_failure);
   RUN_TEST(test_sse_queue_preserves_control_events_when_telemetry_fills_capacity);

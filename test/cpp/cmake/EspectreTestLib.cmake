@@ -82,8 +82,6 @@ add_library(espectre_runtime_testlib STATIC
     "${ESPECTRE_CPP_ROOT}/runtime/csi_traffic_service.cpp"
     "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/primary_console.cpp"
     "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/device_identity.cpp"
-    "${ESPECTRE_CPP_ROOT}/runtime/firmware_version.cpp"
-    "${ESPECTRE_CPP_ROOT}/runtime/ota_version.cpp"
     "${ESPECTRE_CPP_ROOT}/runtime/periodic_sensing_status_logger.cpp"
     "${ESPECTRE_CPP_ROOT}/runtime/espectre_protocol.cpp"
     "${ESPECTRE_CPP_ROOT}/runtime/direct_http_protocol.cpp"
@@ -115,16 +113,16 @@ add_library(espectre_runtime_testlib STATIC
     "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/udp_datagram_socket_esp_idf.cpp"
     "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/udp_listener.cpp"
     "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/wifi_lifecycle.cpp"
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/frontend_bootstrap_helpers.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_bootstrap_helpers.cpp"
     "${ESPECTRE_CPP_ROOT}/runtime/frontend_command_engine.cpp"
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/frontend_ha_mqtt_helpers.cpp"
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/frontend_mqtt_helpers.cpp"
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/frontend_sysinfo_helpers.cpp"
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/raw_csi_session_controller.cpp"
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/device_config_store.cpp"
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/improv_serial_service.cpp"
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/wifi_provisioning_service.cpp"
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/wifi_bssid_pin_service.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_ha_mqtt_helpers.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_mqtt_helpers.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_sysinfo_helpers.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/raw_csi_session_controller.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/device_config_store.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/improv_serial_service.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/wifi_provisioning_service.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/wifi_bssid_pin_service.cpp"
 )
 target_link_libraries(espectre_runtime_testlib
     PUBLIC
@@ -171,14 +169,16 @@ target_include_directories(espectre_native_mdns_bootstrap_testlib
 )
 
 add_library(espectre_mqtt_transport_testlib STATIC
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/mqtt_transport_esp_idf.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/mqtt_transport_esp_idf.cpp"
 )
+add_library(espectre_frontend_ota_protocol_testlib STATIC ${ESPECTRE_FRONTEND_OTA_PROTOCOL_SOURCES})
+target_link_libraries(espectre_frontend_ota_protocol_testlib PUBLIC espectre_runtime_testlib)
 add_library(espectre_ota_https_testlib STATIC
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/ota_service_https.cpp"
+    "${ESPECTRE_CPP_ROOT}/frontend/ota_service_https.cpp"
 )
 target_link_libraries(espectre_ota_https_testlib
     PUBLIC
-        espectre_runtime_testlib
+        espectre_frontend_ota_protocol_testlib
         espectre_test_mocks
 )
 target_link_libraries(espectre_mqtt_transport_testlib
@@ -215,7 +215,7 @@ target_compile_definitions(espectre_runtime_dual_band_testlib
 add_library(espectre_frontend_esphome_testlib STATIC
     ${ESPECTRE_FRONTEND_ESPHOME_SOURCES}
     "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/direct_http_service_esp_idf.cpp"
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/runtime_direct_http_bridge.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/runtime_direct_http_bridge.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/support/frontend_runtime_shim.cpp"
 )
 target_compile_definitions(espectre_frontend_esphome_testlib
@@ -235,7 +235,7 @@ target_include_directories(espectre_frontend_esphome_testlib
 
 add_library(espectre_frontend_matter_testlib STATIC
     ${ESPECTRE_FRONTEND_MATTER_SOURCES}
-    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/frontend_support/runtime_direct_http_bridge.cpp"
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/runtime_direct_http_bridge.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/support/direct_http_service_mock.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/support/matter_bindings_mock.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/support/frontend_runtime_shim.cpp"
@@ -263,7 +263,7 @@ add_library(espectre_frontend_native_testlib STATIC
 )
 target_link_libraries(espectre_frontend_native_testlib
     PUBLIC
-        espectre_runtime_testlib
+        espectre_frontend_ota_protocol_testlib
         espectre_test_mocks
 )
 target_include_directories(espectre_frontend_native_testlib
@@ -281,6 +281,7 @@ foreach(target_name
         espectre_direct_service_testlib
         espectre_native_mdns_bootstrap_testlib
         espectre_mqtt_transport_testlib
+        espectre_frontend_ota_protocol_testlib
         espectre_ota_https_testlib
         espectre_frontend_esphome_testlib
         espectre_frontend_native_testlib

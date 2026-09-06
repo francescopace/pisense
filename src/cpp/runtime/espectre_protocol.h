@@ -1,7 +1,7 @@
 /*
  * ESPectre - ESPectre Protocol
  *
- * Shared device, command, and OTA protocol types used by frontend
+ * Shared device and extensible command protocol types used by frontend
  * transports.
  *
  * Author: Francesco Pace <francesco.pace@gmail.com>
@@ -14,15 +14,17 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "runtime_snapshot.h"
+#include "protocol_json.h"
 
 /**
  * @file espectre_protocol.h
  * @brief Wire types and payload builders for the ESPectre Protocol.
  *
  * The protocol is the contract between a device and whatever consumes it:
- * MQTT topics, Direct HTTP messages, JSON payloads, and the OTA status model.
+ * MQTT topics, Direct HTTP messages, JSON payloads, and frontend extensions.
  * It is specified in `docs/API.md`; this header is the C++ view
  * of that specification.
  *
@@ -67,9 +69,6 @@ enum class EspectreDirectMethod : uint8_t {
   CLEAR_WIFI_CONFIG,
   SET_MQTT_CONFIG,
   CLEAR_MQTT_CONFIG,
-  OTA_STATUS,
-  OTA_CHECK,
-  OTA_START,
   DISCOVER_PEERS,
   COUNT,
 };
@@ -87,7 +86,6 @@ enum class EspectreEvent : uint8_t {
   STATUS,
   INFO,
   CONFIG,
-  OTA_STATUS,
   FAULT,
   COUNT,
 };
@@ -98,6 +96,16 @@ enum class EspectreApiRouteKind : uint8_t {
   STREAM,
 };
 
+struct EspectreCommand;
+
+/** Validate decoded parameters and populate the command before dispatch.
+ * The parser supplies valid JSON fields and the command identity. MQTT fields
+ * also contain its envelope. Validators must not execute commands or change
+ * device state. Ignore command output after a rejected validation.
+ */
+using EspectreCommandValidator = bool (*)(const std::vector<JsonObjectField> &fields,
+                                        EspectreCommand *command, std::string *error);
+
 /** One canonical HTTP/resource mapping used by routing and capability output. */
 struct EspectreApiRoute {
   const char *http_method;
@@ -107,6 +115,7 @@ struct EspectreApiRoute {
   EspectreDirectMethod capability;
   EspectreApiRouteKind kind;
   bool asynchronous;
+  EspectreCommandValidator validate{nullptr};
 };
 
 struct EspectreApiEventDescriptor {
@@ -114,6 +123,32 @@ struct EspectreApiEventDescriptor {
   EspectreEvent event;
   EspectreDirectMethod capability;
 };
+
+/** One frontend-owned route, shared by capability output and both transports. */
+struct EspectreExtensionRoute {
+  const char *http_method;
+  const char *path;
+  const char *name;
+  const char *command;
+  EspectreApiRouteKind kind;
+  bool asynchronous{false};
+  /** Whether the frontend command binding permits invocation over MQTT. */
+  bool mqtt{false};
+  bool allowed_during_raw_collection{false};
+  EspectreCommandValidator validate{nullptr};
+};
+
+/** Immutable frontend additions. Keep this object alive while adapters use it. */
+struct EspectreProtocolExtension {
+  std::vector<EspectreExtensionRoute> routes;
+  std::vector<std::string> events;
+};
+
+/** Reject malformed descriptors and collisions with the SDK or another extension entry. */
+bool validate_protocol_extension(const EspectreProtocolExtension &extension, std::string *error = nullptr);
+/** Find a command in a valid extension; a null or invalid extension has no routes. */
+const EspectreExtensionRoute *find_extension_route(const EspectreProtocolExtension *extension,
+                                                 const std::string &command);
 
 /** Return the immutable v1 resource registry and its entry count. */
 const EspectreApiRoute *espectre_api_routes(size_t *count);
@@ -123,7 +158,9 @@ const EspectreApiEventDescriptor *espectre_api_events(size_t *count);
 struct EspectreCapabilityProfile {
   std::array<bool, static_cast<size_t>(EspectreDirectMethod::COUNT)> methods{};
   std::array<bool, static_cast<size_t>(EspectreConfigSection::COUNT)> config_sections{};
-  std::array<bool, static_cast<size_t>(EspectreEvent::COUNT)> events{{true, true, true, true, false, true}};
+  std::array<bool, static_cast<size_t>(EspectreEvent::COUNT)> events{{true, true, true, true, true}};
+  /** Optional frontend-owned catalog, shared with its transport parsers. */
+  const EspectreProtocolExtension *extension{nullptr};
 
   bool supports(EspectreDirectMethod method) const {
     return methods[static_cast<size_t>(method)];
@@ -158,16 +195,6 @@ inline constexpr const char *ESPECTRE_DNS_SD_TXT_SCHEMA_VERSION = "1";
 inline constexpr size_t ESPECTRE_COMMAND_ID_MAX_LENGTH = 64U;
 /** Default MQTT topic root. Override per device with `EspectreDeviceConfig::topic_prefix`. */
 inline constexpr const char *ESPECTRE_TOPIC_PREFIX = "espectre/v1/devices";
-/** Official tagged GitHub Release OTA channel. */
-inline constexpr const char *ESPECTRE_OTA_CHANNEL_RELEASE = "release";
-/** Rolling `main` OTA channel. Fetches GitHub Releases tag `snapshot`. */
-inline constexpr const char *ESPECTRE_OTA_CHANNEL_PREVIEW = "preview";
-/** Rolling `develop` OTA channel. Fetches GitHub Releases tag `snapshot-dev`. */
-inline constexpr const char *ESPECTRE_OTA_CHANNEL_DEVELOP = "develop";
-/** GitHub Releases tag for the `preview` OTA channel. Distinct from branch `main`. */
-inline constexpr const char *ESPECTRE_OTA_RELEASE_TAG_PREVIEW = "snapshot";
-/** GitHub Releases tag for the `develop` OTA channel. Distinct from branch `develop`. */
-inline constexpr const char *ESPECTRE_OTA_RELEASE_TAG_DEVELOP = "snapshot-dev";
 /** Sentinel meaning "use the runtime-generated device id". */
 inline constexpr uint64_t ESPECTRE_DEFAULT_DEVICE_ID = 0U;
 /** Empty label, meaning the device id is used as the display name. */
@@ -215,7 +242,7 @@ struct EspectreNetworkInfo {
 struct EspectreDeviceInfo {
   /** Frontend name, for example `"native"`, `"matter"`, or your own. */
   std::string frontend{"unknown"};
-  /** Application version, normally `espectre_firmware_version()`. */
+  /** Application version supplied by the frontend or integrator. */
   std::string firmware_version{"unknown"};
   /** Chip target, normally `CONFIG_IDF_TARGET`. */
   std::string chip{"unknown"};
@@ -232,7 +259,6 @@ struct EspectreDeviceInfo {
   bool supports_runtime_detector{false};
   bool supports_manual_recalibration{false};
   bool supports_traffic_control{false};
-  bool supports_ota{false};
   /**
    * CSI traffic ownership mode: `"internal"` or `"external"`.
    *
@@ -311,47 +337,10 @@ struct EspectreCommand {
   bool has_mqtt_password{false};
   bool has_mqtt_topic_prefix{false};
   bool has_mqtt_port{false};
-  /**
-   * OTA release channel for `check_ota` and `start_ota`: `"release"`, `"preview"`,
-   * or `"develop"`. Empty with `has_ota_channel` false means the firmware default.
+  /** JSON parameters for a frontend extension command. Initially the original
+   * request (including the MQTT envelope); its validator may normalize them.
    */
-  std::string ota_channel;
-  bool has_ota_channel{false};
-};
-
-/**
- * OTA progress, as reported to clients.
- *
- * A check runs `IDLE` -> `CHECKING` -> `UPDATE_AVAILABLE` or `UP_TO_DATE`.
- * An update continues `DOWNLOADING` -> `APPLYING` -> `REBOOT_SCHEDULED`.
- * `ERROR` is terminal for the attempt and carries the reason in
- * `EspectreOtaStatus::message`.
- */
-enum class EspectreOtaState : uint8_t {
-  IDLE = 0,
-  CHECKING,
-  UPDATE_AVAILABLE,
-  UP_TO_DATE,
-  DOWNLOADING,
-  APPLYING,
-  REBOOT_SCHEDULED,
-  ERROR,
-};
-
-/** Full OTA status: state, the versions involved, and the resolved URLs. */
-struct EspectreOtaStatus {
-  EspectreOtaState state{EspectreOtaState::IDLE};
-  std::string current_version{"unknown"};
-  std::string target_version;
-  std::string manifest_url;
-  std::string image_url;
-  std::string message;
-  /** Build-time OTA channel used when a command omits its channel. */
-  std::string default_channel;
-  /** Resolved OTA channel for the current attempt. Empty when unused. */
-  std::string channel;
-  bool busy{false};
-  bool update_available{false};
+  std::string extension_parameters;
 };
 
 /**
@@ -396,14 +385,12 @@ std::string espectre_effective_device_label(const EspectreDeviceConfig &config);
  * @param info What the frontend knows about itself.
  * @param snapshot Source of the detector name. May be `nullptr` when no
  *        snapshot exists yet.
- * @param supports_ota Whether this frontend exposes firmware updates.
  * @param default_frontend Frontend name used when `info.frontend` is empty.
  * @param default_chip Chip name used when `info.chip` is empty.
  * @return A copy of `info` with the gaps filled.
  */
 EspectreDeviceInfo normalize_protocol_device_info(const EspectreDeviceInfo &info,
                                                   const RuntimeSnapshot *snapshot,
-                                                  bool supports_ota,
                                                   const char *default_frontend,
                                                   const char *default_chip = nullptr);
 /** Erase broker settings while preserving identity, for a config reset. */
@@ -456,7 +443,8 @@ std::string espectre_capabilities_payload(const EspectreDeviceConfig &config,
                                           bool supports_wifi_bssid = false,
                                           bool supports_mqtt_config = false,
                                           bool supports_peer_discovery = false,
-                                          bool supports_raw_csi = false);
+                                          bool supports_raw_csi = false,
+                                          const EspectreProtocolExtension *extension = nullptr);
 /** Current motion state and score. The payload behind every detector evaluation. */
 std::string espectre_motion_payload(const EspectreDeviceConfig &config,
                                     const RuntimeSnapshot &snapshot,
@@ -497,12 +485,7 @@ std::string espectre_fault_payload(const EspectreDeviceConfig &config,
                                    const char *message,
                                    uint32_t timestamp_ms);
 /** Executable transport-neutral message samples used by the C++/Python parity gate. */
-std::string espectre_message_catalog_payload();
-/** OTA progress payload, for each `IOtaService` status callback worth publishing. */
-std::string espectre_ota_status_payload(const EspectreDeviceConfig &config,
-                                    const EspectreOtaStatus &status,
-                                    uint32_t timestamp_ms);
-
+std::string espectre_message_catalog_payload(const EspectreProtocolExtension *extension = nullptr);
 /** @} */
 
 /**
@@ -518,9 +501,11 @@ std::string espectre_ota_status_payload(const EspectreDeviceConfig &config,
  * @param command Populated only on success. Check the `has_*` flags to see
  *        which fields the peer actually sent.
  * @param error Receives a human-readable reason on failure. May be `nullptr`.
+ * @param extension Optional frontend routes and their parameter validators.
  * @return false on malformed input or an unknown command.
  */
-bool parse_espectre_command(const std::string &payload, EspectreCommand *command, std::string *error);
+bool parse_espectre_command(const std::string &payload, EspectreCommand *command, std::string *error,
+                            const EspectreProtocolExtension *extension = nullptr);
 /**
  * Parse an already separated command name plus a JSON parameter object.
  *
@@ -533,26 +518,8 @@ bool parse_espectre_command_request(const std::string &command_id,
                                     const std::string &params_json,
                                     EspectreCommand *command,
                                     std::string *error,
-                                    const std::string &protocol_version = ESPECTRE_PROTOCOL_VERSION);
-/**
- * Whether `channel` is a published OTA channel name.
- *
- * Accepted values are `release`, `preview`, and `develop`. Empty is not
- * accepted here; omit the field to keep the firmware default.
- */
-bool espectre_ota_channel_accepted(const std::string &channel);
-/**
- * Built-in GitHub Releases firmware catalog URL for the selected channel.
- *
- * `release` uses `/releases/latest/download/`. `preview` uses tag
- * `ESPECTRE_OTA_RELEASE_TAG_PREVIEW` (`snapshot`). `develop` uses tag
- * `ESPECTRE_OTA_RELEASE_TAG_DEVELOP` (`snapshot-dev`).
- * Each channel publishes `firmware-manifest-<channel>.json`; the OTA service
- * selects the frontend and chip from that catalog.
- *
- * @return Empty when `frontend`, `chip`, or `channel` is not a published value.
- */
-std::string espectre_ota_manifest_url(const char *frontend, const char *chip, const std::string &channel);
+                                    const std::string &protocol_version = ESPECTRE_PROTOCOL_VERSION,
+                                    const EspectreProtocolExtension *extension = nullptr);
 /**
  * Parse a legacy ASCII `SET_DEVICE_CONFIG:` command.
  *

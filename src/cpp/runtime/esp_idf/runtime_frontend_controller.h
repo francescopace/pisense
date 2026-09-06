@@ -153,14 +153,12 @@ class RuntimeFrontendController : private IRuntimeListener {
   /** Current armed state, including before setup. */
   bool services_armed() const { return services_armed_; }
   /**
-   * Quiet the runtime ahead of an OTA update.
+   * Temporarily quiet the runtime without releasing its backend or configuration.
    *
-   * Stops any active raw collection, drops live telemetry, and disarms services
-   * so the download is not competing with CSI capture and traffic generation.
-   * Reverse it with
-   * `set_services_armed(true)` if the update is abandoned.
+   * Disables live telemetry and sensing services, and stops active raw collection.
+   * Restore the desired service and telemetry gates explicitly when resuming.
    */
-  void quiesce_for_ota();
+  void quiesce();
 
   /**
    * Set the motion threshold, validating it against the active detector.

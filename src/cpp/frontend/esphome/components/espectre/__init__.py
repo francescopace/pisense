@@ -11,10 +11,9 @@ Author: Francesco Pace <francesco.pace@gmail.com>
 
 from pathlib import Path
 import ipaddress
-import os
 import re
-import subprocess
 
+from esphome import git
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import logger, sensor, binary_sensor, button, number, select, switch, wifi
@@ -26,11 +25,17 @@ from esphome.components.esp32 import (
 )
 from esphome.components.wifi import CONF_BAND_MODE
 from esphome.const import (
+    CONF_COMPONENTS,
     CONF_ESPHOME,
+    CONF_EXTERNAL_COMPONENTS,
     CONF_HARDWARE_UART,
     CONF_ID,
     CONF_LOGGER,
     CONF_PROJECT,
+    CONF_REF,
+    CONF_SOURCE,
+    CONF_TYPE,
+    CONF_URL,
     CONF_VERSION,
     CONF_WIFI,
     STATE_CLASS_MEASUREMENT,
@@ -42,6 +47,7 @@ from esphome.const import (
     ENTITY_CATEGORY_DIAGNOSTIC,
     ICON_PULSE,
     DEVICE_CLASS_SIGNAL_STRENGTH,
+    TYPE_GIT,
 )
 from esphome.core import CORE, CoroPriority, coroutine_with_priority
 
@@ -120,8 +126,6 @@ _SCHEMA_DEPENDENCY_HEADERS = (
     _LIBRARY_ROOT / "core" / "detector_types.h",
     _LIBRARY_ROOT / "core" / "filter_config.h",
 )
-_GIT_VERSION_CORE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)")
-_GIT_DESCRIBE_CMD = ("git", "describe", "--tags", "--match", "[0-9]*", "--abbrev=7")
 _SCHEMA_CONST_PATTERN = re.compile(
     r"constexpr\s+(?:const char \*const|bool|float|size_t|uint8_t|uint16_t|uint32_t)\s+"
     r"([A-Z][A-Z0-9_]+)\s*=\s*([^;]+);"
@@ -132,72 +136,6 @@ _WIFI_BAND_POLICY_BY_MODE = {
     "2.4GHZ": "2g",
     "5GHZ": "5g",
 }
-
-
-def _is_numeric_git_version(version: str) -> bool:
-    return bool(_GIT_VERSION_CORE.match(version.strip()))
-
-
-def _git_describe_version(repo_root: Path) -> str | None:
-    try:
-        result = subprocess.run(
-            _GIT_DESCRIBE_CMD,
-            cwd=repo_root,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except OSError:
-        return None
-    version = result.stdout.strip()
-    if result.returncode != 0 or not _is_numeric_git_version(version):
-        return None
-    return version
-
-
-def _git_describe_roots() -> list[Path]:
-    roots: list[Path] = []
-    seen: set[Path] = set()
-    candidates = [_LIBRARY_ROOT.parents[1], Path.cwd()]
-    workspace = os.environ.get("GITHUB_WORKSPACE")
-    if workspace:
-        candidates.append(Path(workspace))
-    for candidate in candidates:
-        try:
-            resolved = candidate.resolve()
-        except OSError:
-            continue
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        roots.append(resolved)
-    return roots
-
-
-def resolve_espectre_git_version(project_version: str = "") -> str | None:
-    """Return a MAJOR.MINOR.PATCH git-describe identity for the SDK CMake path.
-
-    ESPHome GitHub clones are shallow and have no numeric tags, so CMake cannot
-    run `git describe` there. Prefer `esphome.project.version` when it already
-    carries that identity, then fall back to a checkout that has tags.
-    """
-    version = project_version.strip()
-    if _is_numeric_git_version(version):
-        return version
-    for root in _git_describe_roots():
-        described = _git_describe_version(root)
-        if described:
-            return described
-    return None
-
-
-def _export_espectre_git_version() -> None:
-    esphome_cfg = CORE.config.get(CONF_ESPHOME) or {}
-    project = esphome_cfg.get(CONF_PROJECT) or {}
-    project_version = str(project.get(CONF_VERSION) or "")
-    git_version = resolve_espectre_git_version(project_version)
-    if git_version:
-        os.environ["ESPECTRE_GIT_VERSION"] = git_version
 
 
 def _parse_schema_literal(raw_value, constants):
@@ -507,8 +445,38 @@ async def _configure_tinyusb_primary_console():
     add_idf_sdkconfig_option("CONFIG_TINYUSB_DESC_SERIAL_STRING", "0")
 
 
+def _frontend_ref_version() -> str | None:
+    """Use a numeric ref only from the checkout that supplied this component."""
+    for external in CORE.config.get(CONF_EXTERNAL_COMPONENTS, []):
+        components = external.get(CONF_COMPONENTS, "all")
+        if components != "all" and "espectre" not in components:
+            continue
+        source = external[CONF_SOURCE]
+        if source[CONF_TYPE] != TYPE_GIT:
+            continue
+        ref = source.get(CONF_REF)
+        if not ref or not re.fullmatch(
+            r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+            r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+            r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?",
+            ref,
+        ):
+            continue
+        # Reuse ESPHome's cache location without fetching or describing Git tags.
+        checkout = git._compute_destination_path(
+            f"{source[CONF_URL]}@{ref}", CONF_EXTERNAL_COMPONENTS
+        ).resolve()
+        if _COMPONENT_ROOT.is_relative_to(checkout):
+            return ref
+    return None
+
+
 async def to_code(config):
-    _export_espectre_git_version()
+    project = CORE.config.get(CONF_ESPHOME, {}).get(CONF_PROJECT, {})
+    version = project.get(CONF_VERSION) or _frontend_ref_version()
+    if version:
+        add_idf_sdkconfig_option("CONFIG_APP_PROJECT_VER_FROM_CONFIG", True)
+        add_idf_sdkconfig_option("CONFIG_APP_PROJECT_VER", version)
     add_idf_component(name="espectre", path=str(_COMPONENT_ROOT))
     wifi.request_wifi_ip_state_listener()
     wifi.request_wifi_connect_state_listener()

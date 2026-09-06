@@ -19,7 +19,8 @@ bool parse_direct_http_request(const std::string &http_method,
                                const std::string &path,
                                const std::string &payload,
                                DirectRequest *request,
-                               std::string *error) {
+                               std::string *error,
+                               const EspectreProtocolExtension *extension) {
   if (request == nullptr) {
     if (error != nullptr) {
       *error = "request output is required";
@@ -47,6 +48,15 @@ bool parse_direct_http_request(const std::string &http_method,
       break;
     }
   }
+  if (parsed.command.empty() && extension != nullptr && validate_protocol_extension(*extension)) {
+    for (const auto &route : extension->routes) {
+      if (http_method == route.http_method && path == route.path) {
+        parsed.command = route.command;
+        parsed.asynchronous = route.asynchronous;
+        break;
+      }
+    }
+  }
   if (parsed.command.empty()) return reject("unsupported Direct resource or method");
   if (payload.size() > ESPECTRE_DIRECT_MAX_REQUEST_SIZE) {
     return reject("Direct request exceeds the size limit");
@@ -71,9 +81,10 @@ bool parse_direct_http_request(const std::string &http_method,
 
 bool direct_http_request_to_command(const DirectRequest &request,
                                     EspectreCommand *command,
-                                    std::string *error) {
+                                    std::string *error,
+                                    const EspectreProtocolExtension *extension) {
   return parse_espectre_command_request(
-      request.command_id, request.command, request.params, command, error, ESPECTRE_PROTOCOL_VERSION);
+      request.command_id, request.command, request.params, command, error, ESPECTRE_PROTOCOL_VERSION, extension);
 }
 
 std::string espectre_transport_mapping_payload() {
@@ -92,8 +103,8 @@ std::string espectre_transport_mapping_payload() {
   return out;
 }
 
-std::string espectre_protocol_catalog_payload() {
-  return "{\"message_model\":" + espectre_message_catalog_payload() +
+std::string espectre_protocol_catalog_payload(const EspectreProtocolExtension *extension) {
+  return "{\"message_model\":" + espectre_message_catalog_payload(extension) +
          ",\"transport_mapping\":" + espectre_transport_mapping_payload() + "}";
 }
 

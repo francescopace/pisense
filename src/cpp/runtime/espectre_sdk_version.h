@@ -19,24 +19,33 @@
  * - `ESPECTRE_SDK_VERSION_STRING` is baked in at compile time and identifies
  *   the ESPectre sources in your build. Use it in diagnostics, bug reports,
  *   and to guard code against SDK releases.
- * - `espectre::espectre_firmware_version()` (`firmware_version.h`) reports the
- *   *application* version supplied by your build system. In an integration it
- *   is your product's version, not ESPectre's.
+ * - The *application* version is supplied to the runtime by the frontend or
+ *   integrator. In an integration it is your product's version, not ESPectre's.
  *
- * First-party firmware and host tests define these macros from `git describe`,
- * using either the numeric tag or a moving `<tag>-<commit-count>-g<hash>`
- * identity. Published SDK bundles stamp the same identity into this header.
- * There is no in-tree fallback:
- * configure fails without git history, and an unstamped header does not
- * compile. `ESPECTRE_SDK_VERSION_AT_LEAST()` uses the numeric tag core.
+ * Published SDK bundles stamp their identity into this header. Integrators can
+ * supply all four version macros at compile time to override the package.
+ * The SDK does not inspect Git, environment variables, or firmware metadata.
+ * Missing or incomplete metadata defaults to 0.0.0, meaning an unknown SDK
+ * version. Its numeric macros are zero, so checks for newer releases are false.
  */
 
+#if !defined(ESPECTRE_SDK_VERSION_MAJOR) && !defined(ESPECTRE_SDK_VERSION_MINOR) && \
+    !defined(ESPECTRE_SDK_VERSION_PATCH) && !defined(ESPECTRE_SDK_VERSION_STRING)
 /* ESPECTRE_SDK_VERSION_VALUES_BEGIN */
+/* ESPECTRE_SDK_VERSION_VALUES_END */
+#endif
+
 #if !defined(ESPECTRE_SDK_VERSION_MAJOR) || !defined(ESPECTRE_SDK_VERSION_MINOR) || \
     !defined(ESPECTRE_SDK_VERSION_PATCH) || !defined(ESPECTRE_SDK_VERSION_STRING)
-#error "ESPectre SDK version is unresolved. Fetch numeric git tags, pass -DESPECTRE_GIT_VERSION, or use a stamped SDK bundle."
+#undef ESPECTRE_SDK_VERSION_MAJOR
+#undef ESPECTRE_SDK_VERSION_MINOR
+#undef ESPECTRE_SDK_VERSION_PATCH
+#undef ESPECTRE_SDK_VERSION_STRING
+#define ESPECTRE_SDK_VERSION_MAJOR 0
+#define ESPECTRE_SDK_VERSION_MINOR 0
+#define ESPECTRE_SDK_VERSION_PATCH 0
+#define ESPECTRE_SDK_VERSION_STRING "0.0.0"
 #endif
-/* ESPECTRE_SDK_VERSION_VALUES_END */
 
 /**
  * Legacy packed numeric identity for the SDK version, as `MMmmpp`.
@@ -70,7 +79,8 @@ namespace espectre {
 /**
  * The SDK version as a string, usable where a macro is not.
  *
- * @return `ESPECTRE_SDK_VERSION_STRING`, valid for the process lifetime.
+ * @return `ESPECTRE_SDK_VERSION_STRING`, or `"0.0.0"` when unknown. Never null;
+ *         valid for the process lifetime.
  */
 constexpr const char *espectre_sdk_version() { return ESPECTRE_SDK_VERSION_STRING; }
 

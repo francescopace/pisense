@@ -13,7 +13,7 @@
 #include "frontend_command_engine.h"
 #include "home_assistant_mqtt_frontend.h"
 #include "mqtt_transport.h"
-#include "ota_service.h"
+#include "frontend/ota_service.h"
 #include "runtime_events.h"
 
 namespace espectre {

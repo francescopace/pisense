@@ -118,7 +118,6 @@
 #include "core/espectre_log.h"
 
 // Runtime contracts. Platform-agnostic and host-testable.
-#include "runtime/firmware_version.h"
 #include "runtime/runtime_capabilities.h"
 #include "runtime/runtime_config_utils.h"
 #include "runtime/runtime_diagnostics.h"
@@ -130,9 +129,9 @@
 
 // Boundary interfaces you implement to reach your own transports.
 #include "runtime/espectre_protocol.h"
+#include "runtime/protocol_json.h"
 #include "runtime/direct_http_service.h"
 #include "runtime/mqtt_transport.h"
-#include "runtime/ota_service.h"
 
 // Recommended entry point. The declaration is portable; linking it requires
 // the ESP-IDF runtime sources.

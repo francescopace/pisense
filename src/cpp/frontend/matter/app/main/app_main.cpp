@@ -39,7 +39,7 @@
 #include "direct_http_service_esp_idf.h"
 #include "direct_wifi_snapshot_esp_idf.h"
 #include "espectre_protocol.h"
-#include "firmware_version.h"
+#include "frontend/frontend_firmware_version.h"
 #include "improv_serial_service.h"
 #include "matter_bindings_esp_matter.h"
 #include "matter_commissioning_data.h"
@@ -219,7 +219,7 @@ espectre::MdnsTxtRecords matter_mdns_txt(uint64_t device_id, const std::string &
       {"protovers", espectre::ESPECTRE_PROTOCOL_VERSION},
       {"transport", espectre::ESPECTRE_DIRECT_HTTP_TRANSPORT},
       {"path", espectre::ESPECTRE_DIRECT_HTTP_BASE_ENDPOINT},
-      {"firmware", espectre::espectre_firmware_version()},
+      {"firmware", espectre::frontend_firmware_version()},
       {"chip", CONFIG_IDF_TARGET},
       {"capabilities", "config,monitor,csi"},
   };
@@ -278,7 +278,7 @@ bool matter_onboarding_codes(std::string *qr, std::string *manual_code) {
     const espectre::RuntimeConfig &runtime_config) {
   espectre::ImprovSerialServiceConfig improv_config;
   improv_config.firmware_name = "ESPectre Matter";
-  improv_config.firmware_version = espectre::espectre_firmware_version();
+  improv_config.firmware_version = espectre::frontend_firmware_version();
   improv_config.hardware_variant = CONFIG_IDF_TARGET;
   improv_config.device_name = matter_display_name(
       runtime_config.device_id, CONFIG_ESPECTRE_MATTER_NODE_LABEL);

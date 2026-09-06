@@ -41,9 +41,4 @@ bool publish_frontend_mqtt_command_result(IMqttTransport *transport,
                                           const EspectreDeviceConfig &config,
                                           const FrontendCommandResult &result);
 
-bool publish_frontend_mqtt_ota_status(IMqttTransport *transport,
-                                      const EspectreDeviceConfig &config,
-                                      const EspectreOtaStatus &status,
-                                      uint32_t timestamp_ms);
-
 }  // namespace espectre

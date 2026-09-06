@@ -610,6 +610,98 @@ static bool direct_request_size_allowed(httpd_req_t *request) {
   return false;
 }
 
+typedef bool (*direct_parameter_validator_t)(const cJSON *parameters, const char **error);
+
+typedef struct {
+  httpd_method_t method;
+  const char *path;
+  const char *command;
+  direct_parameter_validator_t validate;
+} direct_route_t;
+
+static bool direct_validate_no_parameters(const cJSON *parameters, const char **error) {
+  if (parameters->child != NULL) {
+    *error = "unknown command parameter";
+    return false;
+  }
+  return true;
+}
+
+static const direct_route_t direct_routes[] = {
+    {HTTP_GET, "/espectre/v1/capabilities", "capabilities", direct_validate_no_parameters},
+    {HTTP_GET, "/espectre/v1/device", "device", direct_validate_no_parameters},
+    {HTTP_GET, "/espectre/v1/health", "health", direct_validate_no_parameters},
+    {HTTP_GET, "/espectre/v1/sensing", "sensing", direct_validate_no_parameters},
+    {HTTP_GET, "/espectre/v1/wifi", "wifi", direct_validate_no_parameters},
+    {HTTP_GET, "/espectre/v1/diagnostics", "diagnostics", direct_validate_no_parameters},
+    {HTTP_POST, "/espectre/v1/sensing/calibrations", "recalibrate", direct_validate_no_parameters},
+};
+
+static bool direct_json_input_allowed(const char *body, size_t length) {
+  unsigned depth = 0U;
+  bool quoted = false;
+  bool escaped = false;
+  for (size_t i = 0U; i < length; ++i) {
+    char token = body[i];
+    if ((unsigned char) token < 0x20U &&
+        (quoted || (token != '\t' && token != '\r' && token != '\n'))) return false;
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (token == '\\') escaped = true;
+      else if (token == '"') quoted = false;
+    } else if (token == '"') {
+      quoted = true;
+    } else if (token == '{' || token == '[') {
+      // Bound cJSON recursion on the HTTP server task's stack.
+      if (++depth > 8U) return false;
+    } else if ((token == '}' || token == ']') && depth > 0U) {
+      --depth;
+    }
+  }
+  return true;
+}
+
+static bool direct_validate_request(httpd_req_t *request, const direct_route_t *route) {
+  char body[DIRECT_MAX_REQUEST_BYTES + 1];
+  size_t received = 0U;
+  while (received < request->content_len) {
+    int count = httpd_req_recv(request, body + received, request->content_len - received);
+    if (count <= 0) {
+      direct_increment(&direct_state.malformed_requests);
+      httpd_resp_set_status(request, "400 Bad Request");
+      (void) httpd_resp_set_hdr(request, "Connection", "close");
+      (void) httpd_resp_sendstr(request, "incomplete Direct request");
+      return false;
+    }
+    received += (size_t) count;
+  }
+  body[received] = '\0';
+  if (received > 0U) {
+    char content_type[96];
+    if (httpd_req_get_hdr_value_str(request, "Content-Type", content_type, sizeof(content_type)) != ESP_OK ||
+        strncmp(content_type, "application/json", strlen("application/json")) != 0) {
+      httpd_resp_set_status(request, "415 Unsupported Media Type");
+      (void) httpd_resp_sendstr(request, "application/json required");
+      return false;
+    }
+  }
+  // Empty bodies represent an empty parameter object, as in the C++ protocol.
+  const char *payload = received == 0U ? "{}" : body;
+  size_t length = received == 0U ? 2U : received;
+  cJSON *parameters = memchr(payload, '\0', length) == NULL && direct_json_input_allowed(payload, length)
+      ? cJSON_ParseWithLengthOpts(payload, length + 1U, NULL, true) : NULL;
+  const char *error = "invalid Direct JSON object";
+  bool valid = cJSON_IsObject(parameters);
+  if (valid) valid = route->validate(parameters, &error);
+  cJSON_Delete(parameters);
+  if (!valid) {
+    direct_increment(&direct_state.malformed_requests);
+    (void) direct_send_result(request, "", route->command, false, "invalid_params",
+                              error, NULL, "400 Bad Request");
+  }
+  return valid;
+}
+
 static esp_err_t direct_request_handler(httpd_req_t *request) {
   if (!direct_set_cors(request)) {
     httpd_resp_set_status(request, "403 Forbidden");
@@ -624,18 +716,17 @@ static esp_err_t direct_request_handler(httpd_req_t *request) {
     httpd_resp_set_status(request, "429 Too Many Requests");
     return httpd_resp_sendstr(request, "Direct request rate limit reached");
   }
-  const char *command = NULL;
-  bool recalibrate = request->method == HTTP_POST &&
-      strcmp(request->uri, "/espectre/v1/sensing/calibrations") == 0;
-  if (request->method == HTTP_GET) {
-    if (strcmp(request->uri, "/espectre/v1/capabilities") == 0) command = "capabilities";
-    else if (strcmp(request->uri, "/espectre/v1/device") == 0) command = "device";
-    else if (strcmp(request->uri, "/espectre/v1/health") == 0) command = "health";
-    else if (strcmp(request->uri, "/espectre/v1/sensing") == 0) command = "sensing";
-    else if (strcmp(request->uri, "/espectre/v1/wifi") == 0) command = "wifi";
-    else if (strcmp(request->uri, "/espectre/v1/diagnostics") == 0) command = "diagnostics";
+  const direct_route_t *route = NULL;
+  for (size_t i = 0U; i < sizeof(direct_routes) / sizeof(direct_routes[0]); ++i) {
+    if (request->method == direct_routes[i].method && strcmp(request->uri, direct_routes[i].path) == 0) {
+      route = &direct_routes[i];
+      break;
+    }
   }
-  bool query = command != NULL;
+  if (route != NULL && !direct_validate_request(request, route)) return ESP_FAIL;
+  const char *command = route != NULL ? route->command : NULL;
+  bool recalibrate = route != NULL && request->method == HTTP_POST;
+  bool query = route != NULL && request->method == HTTP_GET;
   direct_command_snapshot_t snapshot = query
       ? direct_acquire_command_snapshot(command)
       : (direct_command_snapshot_t) {0};

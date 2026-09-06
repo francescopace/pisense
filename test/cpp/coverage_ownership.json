@@ -41,8 +41,6 @@
       "owners": ["test_espectre_protocol", "test_direct_http_service"],
       "sources": [
         "src/cpp/runtime/espectre_protocol.cpp",
-        "src/cpp/runtime/firmware_version.cpp",
-        "src/cpp/runtime/ota_version.cpp",
         "src/cpp/runtime/direct_http_protocol.cpp",
         "src/cpp/runtime/peer_discovery.cpp",
         "src/cpp/runtime/protocol_json.cpp",
@@ -62,10 +60,10 @@
       "kind": "host_test",
       "owners": ["test_runtime_frontend_controller", "test_home_assistant_mqtt_frontend"],
       "sources": [
-        "src/cpp/runtime/esp_idf/frontend_support/frontend_bootstrap_helpers.cpp",
-        "src/cpp/runtime/esp_idf/frontend_support/frontend_ha_mqtt_helpers.cpp",
-        "src/cpp/runtime/esp_idf/frontend_support/frontend_mqtt_helpers.cpp",
-        "src/cpp/runtime/esp_idf/frontend_support/frontend_sysinfo_helpers.cpp"
+        "src/cpp/runtime/esp_idf/frontend_bootstrap_helpers.cpp",
+        "src/cpp/runtime/esp_idf/frontend_ha_mqtt_helpers.cpp",
+        "src/cpp/runtime/esp_idf/frontend_mqtt_helpers.cpp",
+        "src/cpp/runtime/esp_idf/frontend_sysinfo_helpers.cpp"
       ]
     },
     {
@@ -126,22 +124,26 @@
     },
     {
       "kind": "host_test",
-      "owners": ["test_ota_service_https", "test_native_frontend_ota"],
-      "sources": ["src/cpp/runtime/esp_idf/ota_service_https.cpp"]
+      "owners": ["test_ota_service_https", "test_native_frontend_ota", "test_espectre_protocol"],
+      "sources": [
+        "src/cpp/frontend/ota_service_https.cpp",
+        "src/cpp/frontend/ota_protocol.cpp",
+        "src/cpp/frontend/ota_version.cpp"
+      ]
     },
     {
       "kind": "host_test",
       "owners": ["test_device_config_store", "test_wifi_provisioning_service"],
       "sources": [
-        "src/cpp/runtime/esp_idf/frontend_support/device_config_store.cpp",
-        "src/cpp/runtime/esp_idf/frontend_support/improv_serial_service.cpp",
-        "src/cpp/runtime/esp_idf/frontend_support/wifi_provisioning_service.cpp"
+        "src/cpp/runtime/esp_idf/device_config_store.cpp",
+        "src/cpp/runtime/esp_idf/improv_serial_service.cpp",
+        "src/cpp/runtime/esp_idf/wifi_provisioning_service.cpp"
       ]
     },
     {
       "kind": "host_test",
       "owners": ["test_mqtt_transport_esp_idf"],
-      "sources": ["src/cpp/runtime/esp_idf/frontend_support/mqtt_transport_esp_idf.cpp"]
+      "sources": ["src/cpp/runtime/esp_idf/mqtt_transport_esp_idf.cpp"]
     },
     {
       "kind": "host_test",
@@ -152,15 +154,16 @@
         "src/cpp/runtime/esp_idf/mdns_bootstrap_responder.cpp",
         "src/cpp/runtime/esp_idf/mdns_discovery_service.cpp",
         "src/cpp/runtime/esp_idf/peer_discovery_service_esp_idf.cpp",
-        "src/cpp/runtime/esp_idf/frontend_support/raw_csi_session_controller.cpp",
-        "src/cpp/runtime/esp_idf/frontend_support/runtime_direct_http_bridge.cpp",
-        "src/cpp/runtime/esp_idf/frontend_support/wifi_bssid_pin_service.cpp"
+        "src/cpp/runtime/esp_idf/raw_csi_session_controller.cpp",
+        "src/cpp/runtime/esp_idf/runtime_direct_http_bridge.cpp",
+        "src/cpp/runtime/esp_idf/wifi_bssid_pin_service.cpp"
       ]
     },
     {
       "kind": "host_test",
       "owners": ["test_sensor_publisher", "test_frontend_controls"],
       "sources": [
+        "src/cpp/frontend/frontend_firmware_version.cpp",
         "src/cpp/frontend/esphome/components/espectre/esphome_log_sink.cpp",
         "src/cpp/frontend/esphome/components/espectre/recalibrate_button.cpp",
         "src/cpp/frontend/esphome/components/espectre/sensing_switch.cpp",

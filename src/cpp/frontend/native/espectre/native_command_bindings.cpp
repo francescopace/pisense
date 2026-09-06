@@ -23,7 +23,7 @@ namespace espectre {
 FrontendCommandResult NativeCommandBindings::execute(const EspectreCommand &command, FrontendCommandOrigin origin,
                                                      bool allow_local_config, uint64_t connection_token) {
   if (owner_.runtime_.operation_state() == RuntimeOperationState::RAW_COLLECTION &&
-      !frontend_command_allowed_during_raw_collection(command.command)) {
+      !frontend_command_allowed_during_raw_collection(command.command, capability_profile(allow_local_config).extension)) {
     FrontendCommandResult busy;
     busy.handled = true;
     busy.command = command;
@@ -32,9 +32,12 @@ FrontendCommandResult NativeCommandBindings::execute(const EspectreCommand &comm
     return busy;
   }
   const FrontendCommandCapabilities capabilities = capability_profile(allow_local_config);
+  if (find_extension_route(capabilities.extension, command.command) != nullptr) {
+    return execute_frontend_ota_command(command, origin, owner_.ota_service_, owner_.device_info_.firmware_version,
+        [this](const EspectreCommand &) { return owner_.direct_frontend_->ota_payload(); });
+  }
   FrontendCommandResult result = engine_.execute(
-      command, FrontendCommandContext{origin, connection_token}, owner_.ota_service_,
-      owner_.device_info_.firmware_version.c_str(), capabilities,
+      command, FrontendCommandContext{origin, connection_token}, capabilities,
       [this, allow_local_config, capabilities](const EspectreCommand &read) {
         if (read.command == "capabilities") {
           return espectre_capabilities_payload(this->owner_.device_config_, this->owner_.mqtt_protocol_device_info_(),
@@ -60,9 +63,6 @@ FrontendCommandResult NativeCommandBindings::execute(const EspectreCommand &comm
         }
         if (read.command == "read_diagnostics") {
           return std::string{"{}"};
-        }
-        if (read.command == "ota" && this->owner_.ota_service_ != nullptr) {
-          return this->owner_.direct_frontend_->ota_payload();
         }
         return std::string{};
       },
@@ -151,7 +151,7 @@ FrontendCommandResult NativeCommandBindings::execute(const EspectreCommand &comm
           }
           return this->owner_.provisioning_command_callback_("SET_WIFI_BSSID:bssid=", message);
         }
-        if (!this->owner_.provisioning_command_callback_ || !wifi_command.has_wifi_bssid) {
+        if (!this->owner_.provisioning_command_callback_) {
           if (message != nullptr) {
             *message = "Wi-Fi BSSID selection is unavailable";
           }
@@ -166,12 +166,6 @@ FrontendCommandResult NativeCommandBindings::execute(const EspectreCommand &comm
         if (clear) {
           clear_espectre_mqtt_config(&updated);
         } else {
-          if (!mqtt_command.has_mqtt_scheme || !mqtt_command.has_mqtt_host || !mqtt_command.has_mqtt_port) {
-            if (message != nullptr) {
-              *message = "MQTT scheme, host, and port are required";
-            }
-            return false;
-          }
           updated.mqtt_scheme = mqtt_command.mqtt_scheme;
           updated.mqtt_host = mqtt_command.mqtt_host;
           updated.mqtt_port = mqtt_command.mqtt_port;
@@ -184,9 +178,6 @@ FrontendCommandResult NativeCommandBindings::execute(const EspectreCommand &comm
           if (mqtt_command.has_mqtt_topic_prefix) {
             updated.topic_prefix =
                 mqtt_command.mqtt_topic_prefix.empty() ? ESPECTRE_TOPIC_PREFIX : mqtt_command.mqtt_topic_prefix;
-          }
-          if (!validate_espectre_mqtt_config(updated, message)) {
-            return false;
           }
         }
         if (this->owner_.device_config_change_callback_ &&
@@ -245,6 +236,7 @@ FrontendCommandResult NativeCommandBindings::execute(const EspectreCommand &comm
 
 EspectreCapabilityProfile NativeCommandBindings::capability_profile(bool allow_local_config) const {
   EspectreCapabilityProfile profile;
+  profile.extension = owner_.ota_service_ != nullptr ? &frontend_ota_protocol() : nullptr;
   using Method = EspectreDirectMethod;
   profile.set(Method::CAPABILITIES);
   profile.set(Method::INFO);
@@ -266,9 +258,6 @@ EspectreCapabilityProfile NativeCommandBindings::capability_profile(bool allow_l
   profile.set(Method::CLEAR_WIFI_CONFIG, allow_local_config);
   profile.set(Method::SET_MQTT_CONFIG, allow_local_config);
   profile.set(Method::CLEAR_MQTT_CONFIG, allow_local_config);
-  profile.set(Method::OTA_STATUS, owner_.ota_service_ != nullptr);
-  profile.set(Method::OTA_CHECK, owner_.ota_service_ != nullptr);
-  profile.set(Method::OTA_START, owner_.ota_service_ != nullptr);
   profile.set(Method::DISCOVER_PEERS, allow_local_config && owner_.direct_frontend_->peer_discovery_available());
   const bool raw_csi = allow_local_config && owner_.direct_frontend_->raw_stream_available() &&
                        owner_.runtime_.capabilities().supports_raw_csi;

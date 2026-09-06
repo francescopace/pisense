@@ -23,10 +23,8 @@ set(espectre_sdk_requires
     esp_netif
     esp_timer
     mqtt
-    app_update
     esp_http_client
     esp_http_server
-    esp_https_ota
     esp-tls
     nvs_flash
     lwip
@@ -57,10 +55,6 @@ endif()
 
 if(CONFIG_ESPECTRE_SDK_ENABLE_PROVISIONING)
     list(APPEND espectre_sdk_sources ${ESPECTRE_RUNTIME_ESP_IDF_PROVISIONING_SOURCES})
-endif()
-
-if(CONFIG_ESPECTRE_SDK_ENABLE_OTA)
-    list(APPEND espectre_sdk_sources ${ESPECTRE_RUNTIME_ESP_IDF_OTA_SOURCES})
 endif()
 
 if(CONFIG_ESPECTRE_SDK_ENABLE_DIRECT)
@@ -96,16 +90,4 @@ if(CONFIG_ESPECTRE_SDK_ENABLE_DIRECT)
     idf_component_get_property(espectre_mdns_dir espressif__mdns COMPONENT_DIR)
     target_include_directories(${COMPONENT_LIB} PRIVATE "${espectre_mdns_dir}/private_include")
     target_link_options(${COMPONENT_LIB} INTERFACE "LINKER:--wrap=mdns_priv_receive_action")
-endif()
-
-include("${CMAKE_CURRENT_LIST_DIR}/espectre_git_version.cmake")
-if(ESPECTRE_GIT_VERSION AND NOT ESPECTRE_GIT_VERSION_STAMPED)
-    target_compile_definitions(
-        ${COMPONENT_LIB}
-        PUBLIC
-            ESPECTRE_SDK_VERSION_STRING="${ESPECTRE_GIT_VERSION}"
-            ESPECTRE_SDK_VERSION_MAJOR=${ESPECTRE_SDK_VERSION_MAJOR}
-            ESPECTRE_SDK_VERSION_MINOR=${ESPECTRE_SDK_VERSION_MINOR}
-            ESPECTRE_SDK_VERSION_PATCH=${ESPECTRE_SDK_VERSION_PATCH}
-    )
 endif()

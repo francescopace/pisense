@@ -1,13 +1,13 @@
 /*
- * ESPectre - Firmware Version
+ * ESPectre - Frontend Firmware Version
  *
- * Firmware version string helpers.
+ * Firmware version string helper for first-party frontends.
  *
  * Author: Francesco Pace <francesco.pace@gmail.com>
  * SPDX-License-Identifier: GPL-3.0-only
  * Commercial licensing available under separate agreement; see LICENSING.md.
  */
-#include "firmware_version.h"
+#include "frontend_firmware_version.h"
 
 #if __has_include("esp_app_desc.h")
 #include "esp_app_desc.h"
@@ -15,7 +15,7 @@
 
 namespace espectre {
 
-const char *espectre_firmware_version() {
+const char *frontend_firmware_version() {
 #ifdef APP_PROJECT_VER
   return APP_PROJECT_VER;
 #elif __has_include("esp_app_desc.h")

@@ -28,11 +28,11 @@
 #include "espectre_banner.h"
 #include "espectre_log.h"
 #include "espectre_protocol.h"
-#include "firmware_version.h"
+#include "frontend/frontend_firmware_version.h"
 #include "frontend_bootstrap_helpers.h"
 #include "improv_serial_service.h"
 #include "mdns_discovery_service.h"
-#include "ota_service_https.h"
+#include "frontend/ota_service_https.h"
 #include "peer_discovery_service_esp_idf.h"
 #include "primary_console.h"
 #include "mqtt_transport_esp_idf.h"
@@ -119,7 +119,7 @@ espectre::MdnsTxtRecords native_mdns_txt(const espectre::EspectreDeviceConfig &c
       {"protovers", espectre::ESPECTRE_PROTOCOL_VERSION},
       {"transport", espectre::ESPECTRE_DIRECT_HTTP_TRANSPORT},
       {"path", espectre::ESPECTRE_DIRECT_HTTP_BASE_ENDPOINT},
-      {"firmware", espectre::espectre_firmware_version()},
+      {"firmware", espectre::frontend_firmware_version()},
       {"chip", CONFIG_IDF_TARGET},
       {"capabilities", native_capabilities()},
   };
@@ -140,7 +140,7 @@ espectre::PeerDiscoveryCandidate native_peer_candidate(
   candidate.protocol_version = espectre::ESPECTRE_PROTOCOL_VERSION;
   candidate.transport = espectre::ESPECTRE_DIRECT_HTTP_TRANSPORT;
   candidate.path = espectre::ESPECTRE_DIRECT_HTTP_BASE_ENDPOINT;
-  candidate.firmware = espectre::espectre_firmware_version();
+  candidate.firmware = espectre::frontend_firmware_version();
   candidate.chip = CONFIG_IDF_TARGET;
   candidate.capabilities = native_capabilities();
   candidate.port = espectre::ESPECTRE_DIRECT_HTTP_PORT;
@@ -164,7 +164,7 @@ bool improv_network_connected() {
 [[gnu::noinline]] bool setup_native_improv_serial(const std::string &display_name) {
   espectre::ImprovSerialServiceConfig improv_config;
   improv_config.firmware_name = "ESPectre Native";
-  improv_config.firmware_version = espectre::espectre_firmware_version();
+  improv_config.firmware_version = espectre::frontend_firmware_version();
   improv_config.hardware_variant = CONFIG_IDF_TARGET;
   improv_config.device_name = display_name;
   improv_config.device_url = improv_device_url;
@@ -223,7 +223,7 @@ void sync_frontend_wifi_info() {
 
   espectre::EspectreDeviceInfo device_info;
   device_info.frontend = "native";
-  device_info.firmware_version = espectre::espectre_firmware_version();
+  device_info.firmware_version = espectre::frontend_firmware_version();
   device_info.chip = CONFIG_IDF_TARGET;
 
   espectre::StandaloneWifiInfo wifi_info;

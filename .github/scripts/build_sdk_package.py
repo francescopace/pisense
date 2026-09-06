@@ -44,7 +44,6 @@ OPTIONAL_SOURCE_GROUPS = (
     "ESPECTRE_RUNTIME_FRONTEND_SUPPORT_SOURCES",
     "ESPECTRE_RUNTIME_ESP_IDF_MQTT_SOURCES",
     "ESPECTRE_RUNTIME_ESP_IDF_PROVISIONING_SOURCES",
-    "ESPECTRE_RUNTIME_ESP_IDF_OTA_SOURCES",
     "ESPECTRE_RUNTIME_ESP_IDF_DIRECT_SOURCES",
 )
 SDK_REQUIRED_PATHS = (
@@ -54,7 +53,6 @@ SDK_REQUIRED_PATHS = (
     Path("src/cpp/espectre_core_sdk.h"),
     Path("src/cpp/espectre_sdk.h"),
     Path("src/cpp/espectre_sources.cmake"),
-    Path("src/cpp/espectre_git_version.cmake"),
     Path("src/cpp/core/ml_weights.h"),
     Path("src/cpp/runtime/espectre_sdk_version.h"),
     Path("docs/SDK.md"),
@@ -76,7 +74,6 @@ SDK_TOP_LEVEL_FILES = (
     Path("src/cpp/espectre_core_sdk.h"),
     Path("src/cpp/espectre_sdk.h"),
     Path("src/cpp/espectre_sources.cmake"),
-    Path("src/cpp/espectre_git_version.cmake"),
     Path("src/cpp/Doxyfile"),
     # The integration guide travels with the sources so a bundle is
     # self-contained: `doxygen src/cpp/Doxyfile` from the bundle root rebuilds
@@ -130,6 +127,12 @@ def detect_protocol_version() -> str:
 def detect_sdk_version(header: Path | None = None) -> str:
     """Read the compile-time SDK version from a stamped header."""
     source = (header or SDK_VERSION_HEADER).read_text(encoding="utf-8")
+    values = re.search(
+        r"/\* ESPECTRE_SDK_VERSION_VALUES_BEGIN \*/(.*?)/\* ESPECTRE_SDK_VERSION_VALUES_END \*/",
+        source,
+        re.DOTALL,
+    )
+    source = values.group(1) if values else ""
     match = re.search(r'#define\s+ESPECTRE_SDK_VERSION_STRING\s+"([^"]+)"', source)
     if not match:
         raise ValueError("Unable to detect ESPECTRE_SDK_VERSION_STRING")

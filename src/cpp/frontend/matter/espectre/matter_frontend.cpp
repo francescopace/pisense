@@ -14,7 +14,7 @@
 #include "device_identity.h"
 #include "direct_http_protocol.h"
 #include <esp_log.h>
-#include "firmware_version.h"
+#include "frontend/frontend_firmware_version.h"
 #include "matter_surface.h"
 #include "protocol_json.h"
 #include "runtime_config_utils.h"
@@ -118,7 +118,7 @@ bool MatterFrontend::start_direct_service_() {
               "matter",
               espectre_device_name(device_id, CONFIG_IDF_TARGET),
               "",
-              espectre_firmware_version(),
+              frontend_firmware_version(),
               CONFIG_IDF_TARGET,
               device_id,
               ESPECTRE_DIRECT_HTTP_PORT,

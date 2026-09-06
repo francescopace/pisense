@@ -226,8 +226,6 @@ std::string RuntimeDirectHttpBridge::handle_request_(const DirectRequest &reques
   FrontendCommandResult result = command_engine_.execute(
       command,
       FrontendCommandContext{FrontendCommandOrigin::DIRECT, 0U},
-      nullptr,
-      config_.firmware_version.c_str(),
       capabilities,
       [this](const EspectreCommand &read) {
         if (read.command == "capabilities") return capabilities_payload_();
@@ -658,7 +656,7 @@ std::string RuntimeDirectHttpBridge::device_payload_() const {
   info.firmware_version = config_.firmware_version;
   info.chip = config_.chip;
   info.evaluation_interval_ms = runtime_->config().evaluation_interval_ms;
-  info = normalize_protocol_device_info(info, &runtime_->snapshot(), false,
+  info = normalize_protocol_device_info(info, &runtime_->snapshot(),
                                         config_.frontend.c_str(),
                                         config_.chip.c_str());
   return espectre_device_payload(device, info);

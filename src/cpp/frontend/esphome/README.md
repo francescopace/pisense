@@ -284,6 +284,14 @@ external_components:
     components: [espectre]
 ```
 
+The SDK uses its packaged version metadata, or `0.0.0` when that metadata is absent. ESPHome does not infer the SDK version from Git, the source `ref`, or `esphome.project.version`. The application version remains owned by the ESPHome frontend. See [SDK.md](../../../../docs/SDK.md#versioning) for explicit SDK version overrides.
+
+During build generation, the component passes `esphome.project.version` to ESP-IDF as the application version. Without a project version, it uses the Git `ref` of the source that supplied the ESPectre component when it has the form `MAJOR.MINOR.PATCH`, optionally followed by a prerelease or build suffix (for example, `3.0.0-rc1`). Other refs, such as `main`, commit hashes, and an omitted ref, leave ESPHome's default application version unchanged. Local sources also use that default when no project version is configured. No Git commands are needed to resolve this frontend version. ESP-IDF limits application versions to 31 bytes, as it does for Native and Matter.
+
+At runtime, ESPHome, Native, and Matter share the same `frontend_firmware_version()` implementation, which reads the application version embedded by ESP-IDF. First-party ESPHome CI and repository builds set `esphome.project.version` to the resolved Git version.
+
+Omit `ref` to use the repository's default branch. ESPHome rejects an explicitly empty `ref: ""` during YAML validation, and a nonexistent ref still prevents it from downloading the component.
+
 Repository development selects `espectre-source-local.yaml` instead, which resolves the same component from the local checkout:
 
 ```yaml

@@ -131,6 +131,8 @@ Native returns `configured`, `scheme`, `host`, `port`, `username_configured`, an
 
 ### `ota`
 
+OTA is a frontend-owned extension of the canonical message model. Native registers its resource, operations, event, and parameter validation through the same extension catalog for Direct HTTP and MQTT. The sensing SDK does not implement firmware updates.
+
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `state` | string | `idle`, `checking`, `update_available`, `up_to_date`, `downloading`, `applying`, `reboot_scheduled`, `error`, or `unknown` |

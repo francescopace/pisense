@@ -48,14 +48,16 @@ bool parse_direct_http_request(const std::string &http_method,
                                const std::string &path,
                                const std::string &payload,
                                DirectRequest *request,
-                               std::string *error = nullptr);
+                               std::string *error = nullptr,
+                               const EspectreProtocolExtension *extension = nullptr);
 bool direct_http_request_to_command(const DirectRequest &request,
                                     EspectreCommand *command,
-                                    std::string *error = nullptr);
+                                    std::string *error = nullptr,
+                                    const EspectreProtocolExtension *extension = nullptr);
 
 /** Executable Direct/MQTT mapping owned and tested by C++. */
 std::string espectre_transport_mapping_payload();
 /** Combined message-model and transport-mapping catalog for protocol inspection. */
-std::string espectre_protocol_catalog_payload();
+std::string espectre_protocol_catalog_payload(const EspectreProtocolExtension *extension = nullptr);
 
 }  // namespace espectre

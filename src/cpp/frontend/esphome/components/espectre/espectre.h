@@ -176,7 +176,7 @@ class ESpectreComponent : public Component, public IRuntimeListener
   void publish_cached_diagnostics_();
   void drain_pending_runtime_events_();
   void update_live_telemetry_enabled_();
-  FrontendCommandResult execute_entity_command_(const EspectreCommand &command);
+  FrontendCommandResult execute_entity_command_(const std::string &name, const std::string &parameters = "{}");
   void sync_direct_config_();
   void setup_mdns_discovery_();
   std::string device_name_() const;

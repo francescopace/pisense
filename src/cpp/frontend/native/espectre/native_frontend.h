@@ -17,7 +17,7 @@
 
 #include "frontend_command_engine.h"
 #include "native_direct_frontend.h"
-#include "ota_service.h"
+#include "frontend/ota_service.h"
 #include "runtime_event_mailbox.h"
 #include "runtime_frontend_controller.h"
 

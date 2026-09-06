@@ -117,7 +117,7 @@ Native selects its build-time sensing defaults through the shared ESP-IDF `sdkco
 
 ## OTA
 
-Native uses the shared ESP-IDF HTTPS OTA service. Direct exposes the `ota` resource plus `POST /ota/checks` and `POST /ota/updates`; MQTT uses `check_ota` and `start_ota` when its advertised capabilities include OTA.
+Native uses the reusable HTTPS OTA service in the shared `src/cpp/frontend/` code. `frontend_ota_protocol()` registers the additional OTA routes, parameter validation, and event in the SDK's generic extension catalog; OTA policy and implementation remain outside the SDK. Native compiles `ESPECTRE_FRONTEND_OTA_SOURCES`, and other frontend integrations can opt into the same source group. Before downloading, Native calls the generic runtime `quiesce()` operation and stops its transports. Direct exposes the `ota` resource plus `POST /ota/checks` and `POST /ota/updates`; MQTT uses `check_ota` and `start_ota` when its advertised capabilities include OTA.
 
 - `release`, `preview`, and `develop` select the corresponding publication channel.
 - Clients cannot override the manifest host, image URL, chip, or target version.
@@ -156,6 +156,6 @@ Confirm that the endpoint reports `configured: true`, that the broker hostname r
 - [`../../runtime/direct_http_protocol.cpp`](../../runtime/direct_http_protocol.cpp): canonical request parsing and Direct/MQTT protocol mapping
 - [`../../runtime/esp_idf/direct_http_service_esp_idf.cpp`](../../runtime/esp_idf/direct_http_service_esp_idf.cpp): bounded ESP-IDF HTTP, SSE, and binary streaming server
 - [`../../runtime/esp_idf/mdns_discovery_service.cpp`](../../runtime/esp_idf/mdns_discovery_service.cpp): shared Direct discovery lifecycle
-- [`../../runtime/esp_idf/frontend_support/improv_serial_service.cpp`](../../runtime/esp_idf/frontend_support/improv_serial_service.cpp): standard Improv Serial adapter
-- [`../../runtime/esp_idf/frontend_support/wifi_provisioning_service.cpp`](../../runtime/esp_idf/frontend_support/wifi_provisioning_service.cpp): staged Wi-Fi updates, commit, rollback, and BSSID fallback
+- [`../../runtime/esp_idf/improv_serial_service.cpp`](../../runtime/esp_idf/improv_serial_service.cpp): standard Improv Serial adapter
+- [`../../runtime/esp_idf/wifi_provisioning_service.cpp`](../../runtime/esp_idf/wifi_provisioning_service.cpp): staged Wi-Fi updates, commit, rollback, and BSSID fallback
 - [`../../runtime/espectre_protocol.cpp`](../../runtime/espectre_protocol.cpp): shared command and application payload semantics

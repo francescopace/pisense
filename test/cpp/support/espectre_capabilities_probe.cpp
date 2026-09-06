@@ -11,6 +11,7 @@
 #include <string>
 
 #include "runtime/direct_http_protocol.h"
+#include "frontend/ota_protocol.h"
 #include "runtime/espectre_protocol.h"
 
 int main(int argc, char **argv) {
@@ -34,7 +35,7 @@ int main(int argc, char **argv) {
     capabilities.set(espectre::EspectreEvent::TELEMETRY);
     std::cout << "{\"capabilities\":"
               << espectre::espectre_capabilities_payload(config, info, capabilities)
-              << ",\"message_model\":" << espectre::espectre_message_catalog_payload() << "}\n";
+              << ",\"message_model\":" << espectre::espectre_message_catalog_payload(&espectre::frontend_ota_protocol()) << "}\n";
     return 0;
   }
 
@@ -47,7 +48,6 @@ int main(int argc, char **argv) {
 
   const bool native_profile = argc > 1 && std::string(argv[1]) == "native";
   info.supports_device_config = native_profile;
-  info.supports_ota = native_profile;
   std::cout << "{\"capabilities\":"
             << espectre::espectre_capabilities_payload(config,
                                                        info,
@@ -56,8 +56,10 @@ int main(int argc, char **argv) {
                                                        native_profile,
                                                        native_profile,
                                                        native_profile,
-                                                       native_profile)
-            << ",\"message_model\":" << espectre::espectre_message_catalog_payload()
+                                                       native_profile,
+                                                       false,
+                                                       native_profile ? &espectre::frontend_ota_protocol() : nullptr)
+            << ",\"message_model\":" << espectre::espectre_message_catalog_payload(&espectre::frontend_ota_protocol())
             << ",\"transport_mapping\":" << espectre::espectre_transport_mapping_payload()
             << "}\n";
   return 0;

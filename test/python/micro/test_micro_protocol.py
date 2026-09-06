@@ -71,7 +71,7 @@ def test_runtime_wifi_diagnostics_tolerate_older_or_unavailable_drivers(reader, 
     assert reader(None) == unavailable
     assert reader(SimpleNamespace()) == unavailable
     for value in [None, "invalid"]:
-        assert reader(SimpleNamespace(**{method: lambda *_args: value})) == unavailable
+        assert reader(SimpleNamespace(**{method: lambda *_args, value=value: value})) == unavailable
 
     def failed(*_args):
         raise OSError("driver unavailable")
@@ -469,8 +469,8 @@ def test_direct_facade_uptime_accumulates_across_tick_wrap(monkeypatch):
     assert facade._uptime_seconds(1500) == 2
 
 
-def test_native_direct_rejects_oversized_bodies_before_recalibration(tmp_path):
-    """Execute the device handler with HTTPD stubs, including boundary sizes."""
+def test_native_direct_validates_requests_before_dispatch(tmp_path):
+    """Execute the device handler with HTTPD and JSON parser boundary stubs."""
     source = (
         repo_root() / "src/python/micro_espectre/firmware/native_components/native_direct.c"
     ).read_text(encoding="utf-8")
@@ -481,18 +481,42 @@ def test_native_direct_rejects_oversized_bodies_before_recalibration(tmp_path):
         source.index("static esp_err_t direct_options_handler(")
     ]
     stubs = r'''
-
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 typedef int esp_err_t;
+typedef int httpd_method_t;
 typedef struct { int method; const char *uri; size_t content_len; } httpd_req_t;
 typedef struct { const char *data; } direct_command_snapshot_t;
-enum { HTTP_POST=1, HTTP_GET=2, ESP_FAIL=-1 };
-static struct { unsigned rate_limited_requests; unsigned oversized_requests; } direct_state;
-static bool queued;
-static bool close_connection;
-static const char *response_status;
+enum { HTTP_POST=1, HTTP_GET=2, HTTP_PATCH=3, ESP_OK=0, ESP_FAIL=-1 };
+static struct { unsigned rate_limited_requests; unsigned oversized_requests; unsigned malformed_requests; } direct_state;
+static bool queued, close_connection, busy;
+static unsigned snapshot_reads, receive_calls, parser_calls;
+static const char *response_status, *response_code, *incoming, *content_type;
+static size_t incoming_length, received;
+static int json_kind;
+#ifdef TEST_REAL_CJSON
+#include "cJSON.h"
+static cJSON *test_parse(const char *body, size_t length, const char **end, bool strict) {
+    ++parser_calls;
+    return cJSON_ParseWithLengthOpts(body, length, end, strict);
+}
+#define cJSON_ParseWithLengthOpts test_parse
+#else
+/* The JSON dependency supplies a decoded object or a parse failure. The
+ * contract exercised here is validation and dispatch around that boundary. */
+typedef struct cJSON { struct cJSON *child; bool object; } cJSON;
+static cJSON *cJSON_ParseWithLengthOpts(const char *body, size_t length, const char **end, bool strict) {
+    static cJSON value;
+    ++parser_calls;
+    if (!strict || length != strlen(body) + 1U || json_kind == 0) return NULL;
+    value.child = json_kind == 2 ? &value : NULL;
+    value.object = json_kind != 3;
+    return &value;
+}
+static bool cJSON_IsObject(const cJSON *value) { return value != NULL && value->object; }
+static void cJSON_Delete(cJSON *value) {}
+#endif
 static bool direct_set_cors(httpd_req_t *r) { return true; }
 static bool direct_request_allowed(void) { return true; }
 static void direct_increment(unsigned *p) { ++*p; }
@@ -503,30 +527,110 @@ static int httpd_resp_set_hdr(httpd_req_t *r, const char *k, const char *v) {
     if (strcmp(k, "Connection") == 0 && strcmp(v, "close") == 0) close_connection = true;
     return 0;
 }
-static direct_command_snapshot_t direct_acquire_command_snapshot(const char *s) { return (direct_command_snapshot_t){"{}"}; }
+static int httpd_req_get_hdr_value_str(httpd_req_t *r, const char *key, char *out, size_t size) {
+    if (content_type == NULL || strlen(content_type) >= size) return ESP_FAIL;
+    strcpy(out, content_type);
+    return ESP_OK;
+}
+static int httpd_req_recv(httpd_req_t *r, char *out, size_t size) {
+    ++receive_calls;
+    if (received >= incoming_length) return ESP_FAIL;
+    /* Fragment the body to exercise repeated receive calls. */
+    size_t count = incoming_length - received;
+    if (count > size) count = size;
+    if (count > 3U) count = 3U;
+    memcpy(out, incoming + received, count);
+    received += count;
+    return (int) count;
+}
+static direct_command_snapshot_t direct_acquire_command_snapshot(const char *s) {
+    ++snapshot_reads;
+    return (direct_command_snapshot_t){"{}"};
+}
 static void direct_release_command_snapshot(direct_command_snapshot_t *s) {}
-static bool direct_queue_recalibration(void) { queued=true; return true; }
-static int direct_send_result(httpd_req_t *r, const char *id, const char *cmd, bool ok, const char *code, const char *msg, void *data, const char *status) { response_status=status; return 0; }
+static bool direct_queue_recalibration(void) { queued = !busy; return queued; }
+static int direct_send_result(httpd_req_t *r, const char *id, const char *cmd, bool ok, const char *code, const char *msg, void *data, const char *status) {
+    response_status=status;
+    response_code=code;
+    return 0;
+}
+static void reset(const char *body, size_t size, int kind) {
+    memset(&direct_state, 0, sizeof(direct_state));
+    queued = close_connection = busy = false;
+    snapshot_reads = receive_calls = parser_calls = 0U;
+    response_status = "200 OK";
+    response_code = "";
+    incoming = body;
+    incoming_length = size;
+    received = 0U;
+    content_type = "application/json";
+    json_kind = kind;
+}
 '''
     main = r'''
-
+#define CHECK(condition) do { if (!(condition)) { fprintf(stderr, "line %d: %s\n", __LINE__, #condition); return 1; } } while (0)
 int main(void) {
+    char padded[DIRECT_MAX_REQUEST_BYTES + 1];
+    memset(padded, ' ', sizeof(padded));
+    padded[0] = '{'; padded[1] = '}'; padded[DIRECT_MAX_REQUEST_BYTES] = '\0';
     const size_t sizes[] = {0, DIRECT_MAX_REQUEST_BYTES, DIRECT_MAX_REQUEST_BYTES + 1, 1048576};
     for (unsigned i = 0; i < sizeof(sizes) / sizeof(sizes[0]); ++i) {
-        queued = false;
-        close_connection = false;
-        response_status = NULL;
-        direct_state.oversized_requests = 0;
+        reset(padded, DIRECT_MAX_REQUEST_BYTES, 1);
         httpd_req_t request = {HTTP_POST, "/espectre/v1/sensing/calibrations", sizes[i]};
         int result = direct_request_handler(&request);
         bool oversized = sizes[i] > DIRECT_MAX_REQUEST_BYTES;
-        if (queued == oversized || close_connection != oversized ||
-            direct_state.oversized_requests != oversized ||
-            result != (oversized ? ESP_FAIL : 0) ||
-            strcmp(response_status, oversized ? "413 Payload Too Large" : "202 Accepted") != 0) {
-            return 1;
-        }
+        CHECK(queued != oversized && close_connection == oversized);
+        CHECK(direct_state.oversized_requests == oversized);
+        CHECK(result == (oversized ? ESP_FAIL : ESP_OK));
+        CHECK(strcmp(response_status, oversized ? "413 Payload Too Large" : "202 Accepted") == 0);
+        CHECK(!oversized || (receive_calls == 0U && parser_calls == 0U));
     }
+    const struct { const char *body; int kind; } cases[] = {
+        {"{", 0}, {"[]", 3}, {"null", 3}, {"{} garbage", 0},
+        {"{\"force\":true}", 2}, {"{\"force\":true,\"force\":false}", 2},
+    };
+    for (unsigned route = 0; route < sizeof(direct_routes) / sizeof(direct_routes[0]); ++route) {
+        for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+            reset(cases[i].body, strlen(cases[i].body), cases[i].kind);
+            httpd_req_t request = {direct_routes[route].method, direct_routes[route].path, incoming_length};
+            CHECK(direct_request_handler(&request) == ESP_FAIL);
+            CHECK(!queued && snapshot_reads == 0U && parser_calls == 1U);
+            CHECK(direct_state.malformed_requests == 1U);
+            CHECK(strcmp(response_status, "400 Bad Request") == 0);
+            CHECK(strcmp(response_code, "invalid_params") == 0);
+        }
+        reset("{}", 2U, 1);
+        httpd_req_t request = {direct_routes[route].method, direct_routes[route].path, 2U};
+        CHECK(direct_request_handler(&request) == ESP_OK);
+        CHECK(parser_calls == 1U);
+        CHECK(queued == (request.method == HTTP_POST));
+        CHECK(snapshot_reads == (request.method == HTTP_GET));
+    }
+    const char *nested = "[[[[[[[[[0]]]]]]]]]";
+    reset(nested, strlen(nested), 3);
+    httpd_req_t deep_request = {HTTP_POST, "/espectre/v1/sensing/calibrations", incoming_length};
+    CHECK(direct_request_handler(&deep_request) == ESP_FAIL);
+    CHECK(!queued && parser_calls == 0U && direct_state.malformed_requests == 1U);
+    reset("{}\0junk", 7U, 1);
+    httpd_req_t request = {HTTP_POST, "/espectre/v1/sensing/calibrations", 7U};
+    CHECK(direct_request_handler(&request) == ESP_FAIL);
+    CHECK(!queued && parser_calls == 0U && direct_state.malformed_requests == 1U);
+    reset("{", 1U, 0);
+    request.content_len = 2U;
+    CHECK(direct_request_handler(&request) == ESP_FAIL);
+    CHECK(!queued && close_connection && parser_calls == 0U);
+    for (int missing = 0; missing < 2; ++missing) {
+        reset("{}", 2U, 1);
+        content_type = missing ? NULL : "text/plain";
+        CHECK(direct_request_handler(&request) == ESP_FAIL);
+        CHECK(!queued && parser_calls == 0U);
+        CHECK(strcmp(response_status, "415 Unsupported Media Type") == 0);
+    }
+    reset("{}", 2U, 1);
+    busy = true;
+    CHECK(direct_request_handler(&request) == ESP_OK);
+    CHECK(!queued && strcmp(response_status, "409 Conflict") == 0);
+    CHECK(strcmp(response_code, "busy") == 0);
     return 0;
 }
 '''

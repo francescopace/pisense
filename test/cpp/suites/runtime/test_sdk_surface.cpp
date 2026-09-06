@@ -36,26 +36,6 @@ class MinimalListener : public IRuntimeListener {
   MotionState last_state{MotionState::IDLE};
 };
 
-class LegacyOtaService : public IOtaService {
- public:
-  void loop() override {}
-  void shutdown() override {}
-  bool start_check(const std::string &) override {
-    check_calls++;
-    return true;
-  }
-  bool start_update(const std::string &) override {
-    update_calls++;
-    return true;
-  }
-  EspectreOtaStatus status() const override { return {}; }
-  void set_status_callback(StatusCallback) override {}
-  void set_prepare_for_update_callback(PrepareForUpdateCallback) override {}
-
-  int check_calls{0};
-  int update_calls{0};
-};
-
 struct CapturedLog {
   LogLevel maximum_level{LogLevel::VERBOSE};
   std::string accepted_tag;
@@ -332,17 +312,6 @@ void test_core_only_detector_path_is_reachable_from_the_facade(void) {
   TEST_ASSERT_TRUE(subcarrier_count > 0U);
 }
 
-void test_legacy_ota_service_rejects_channels_it_cannot_honor(void) {
-  LegacyOtaService service;
-  IOtaService &api = service;
-
-  TEST_ASSERT_TRUE(api.start_check("3.0.0", ""));
-  TEST_ASSERT_TRUE(api.start_update("3.0.0", ""));
-  TEST_ASSERT_FALSE(api.start_check("3.0.0", ESPECTRE_OTA_CHANNEL_PREVIEW));
-  TEST_ASSERT_FALSE(api.start_update("3.0.0", "invalid"));
-  TEST_ASSERT_EQUAL(1, service.check_calls);
-  TEST_ASSERT_EQUAL(1, service.update_calls);
-}
 
 int process(void) {
   UNITY_BEGIN();
@@ -359,7 +328,6 @@ int process(void) {
   RUN_TEST(test_listener_callbacks_default_to_no_ops);
   RUN_TEST(test_detector_names_round_trip_through_the_protocol_form);
   RUN_TEST(test_core_only_detector_path_is_reachable_from_the_facade);
-  RUN_TEST(test_legacy_ota_service_rejects_channels_it_cannot_honor);
   return UNITY_END();
 }
 

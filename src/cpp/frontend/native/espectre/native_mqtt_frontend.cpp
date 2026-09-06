@@ -82,7 +82,7 @@ bool NativeMqttFrontend::publish_message(const char *suffix, const std::string &
 void NativeMqttFrontend::handle_command_(const std::string &payload) {
   EspectreCommand command;
   std::string parse_error;
-  if (!parse_espectre_command(payload, &command, &parse_error)) {
+  if (!parse_espectre_command(payload, &command, &parse_error, owner_.command_capability_profile_(false).extension)) {
     if (command.command.empty()) {
       command.command = "unknown";
     }
@@ -130,7 +130,8 @@ void NativeMqttFrontend::publish_config() {
 }
 
 void NativeMqttFrontend::publish_ota_status(const EspectreOtaStatus &status) {
-  (void)publish_frontend_mqtt_ota_status(transport_, owner_.device_config_, status, owner_.now_ms_());
+  (void)publish_frontend_mqtt_message(transport_, owner_.device_config_, "ota",
+      espectre_ota_status_payload(owner_.device_config_, status, owner_.now_ms_()), true);
 }
 
 void NativeMqttFrontend::publish_current_ota_status() {

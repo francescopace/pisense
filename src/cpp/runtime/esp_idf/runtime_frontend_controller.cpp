@@ -126,12 +126,12 @@ void RuntimeFrontendController::set_live_telemetry_enabled(bool enabled) {
   apply_deferred_shutdown_();
 }
 
-void RuntimeFrontendController::quiesce_for_ota() {
+void RuntimeFrontendController::quiesce() {
   set_live_telemetry_enabled(false);
   if (runtime_ && runtime_->operation_state() == RuntimeOperationState::RAW_COLLECTION) {
     set_services_armed(false);
     if (!stop_raw_collection(RawCsiStopReason::SHUTDOWN)) {
-      ESPECTRE_LOGE(TAG, "Failed to stop raw collection while preparing for OTA");
+      ESPECTRE_LOGE(TAG, "Failed to stop raw collection while quiescing the runtime");
     }
     return;
   }

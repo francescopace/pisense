@@ -131,14 +131,15 @@ def layer(path: Path) -> int:
     if parts[0] == "runtime":
         return 1
     if parts[0] == "frontend":
-        return 2
+        # Shared frontend helpers sit below concrete frontend implementations.
+        return 2 if len(parts) == 2 else 3
     raise AssertionError(f"unclassified C++ source: {path}")
 
 
 def frontend_name(path: Path) -> str | None:
     """Return the concrete frontend name."""
     parts = path.relative_to(CPP_ROOT).parts
-    if len(parts) >= 2 and parts[0] == "frontend":
+    if len(parts) >= 3 and parts[0] == "frontend":
         return parts[1]
     return None
 

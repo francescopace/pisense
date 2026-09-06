@@ -11,7 +11,6 @@ src/cpp/
 ├── core/
 ├── runtime/
 │   └── esp_idf/
-│       └── frontend_support/
 └── frontend/
     ├── esphome/
     ├── native/
@@ -109,7 +108,7 @@ For the ESPHome workflow, see [`README.md` (esphome)](../src/cpp/frontend/esphom
 
 ### Native
 
-`src/cpp/frontend/native/` exposes the runtime through Improv Serial provisioning, local Direct HTTP, and optional MQTT. `NativeFrontend` composes dedicated Direct, MQTT, and Home Assistant adapters around the shared runtime and `FrontendCommandEngine`; transport lifecycle, queues, discovery, subscriptions, and framing remain in their owning adapters. It reuses the shared ESP-IDF services for staged Wi-Fi configuration, device configuration, mDNS, transport-independent commands, diagnostics, raw CSI, and OTA. Native alone delegates credential reset to its provisioning owner and adds MQTT configuration and OTA to the common Direct surface.
+`src/cpp/frontend/native/` exposes the runtime through Improv Serial provisioning, local Direct HTTP, and optional MQTT. `NativeFrontend` composes dedicated Direct, MQTT, and Home Assistant adapters around the shared runtime and `FrontendCommandEngine`; transport lifecycle, queues, discovery, subscriptions, and framing remain in their owning adapters. It reuses the shared ESP-IDF services for staged Wi-Fi configuration, device configuration, mDNS, transport-independent commands, diagnostics, and raw CSI. Its OTA service and protocol extension live in the shared `src/cpp/frontend/` code. Native alone delegates credential reset to its provisioning owner and adds MQTT configuration and OTA to the common Direct surface.
 
 For the native workflow and protocol surface, see:
 

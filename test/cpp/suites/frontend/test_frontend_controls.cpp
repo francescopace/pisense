@@ -646,6 +646,22 @@ void test_threshold_number_behaviors_cover_parent_and_no_parent_paths(void) {
   TEST_ASSERT_EQUAL_FLOAT(0.375f, number.get_state());
 }
 
+void test_entity_commands_validate_parameters_before_runtime_callbacks(void) {
+  ESpectreComponentProbe component;
+  component.setup();
+  const int threshold_calls = frontend_runtime_shim::state.set_threshold_calls;
+  const int motion_calls = frontend_runtime_shim::state.set_motion_hits_calls;
+  const int detector_calls = frontend_runtime_shim::state.set_detector_calls;
+  TEST_ASSERT_FALSE(component.set_threshold_runtime(-0.1f));
+  TEST_ASSERT_FALSE(component.set_threshold_runtime(1.1f));
+  TEST_ASSERT_FALSE(component.set_motion_hits_runtime(0U, 1U));
+  TEST_ASSERT_FALSE(component.set_motion_hits_runtime(1U, 21U));
+  TEST_ASSERT_FALSE(component.set_detection_algorithm_runtime("invalid"));
+  TEST_ASSERT_EQUAL(threshold_calls, frontend_runtime_shim::state.set_threshold_calls);
+  TEST_ASSERT_EQUAL(motion_calls, frontend_runtime_shim::state.set_motion_hits_calls);
+  TEST_ASSERT_EQUAL(detector_calls, frontend_runtime_shim::state.set_detector_calls);
+}
+
 void test_motion_hits_number_behaviors_cover_parent_and_no_parent_paths(void) {
   ESpectreComponentProbe component;
   MotionHitsNumberProbe motion_on_number;
@@ -1064,6 +1080,7 @@ int process(void) {
   RUN_TEST(test_espectre_component_publishes_cached_csi_diagnostics_on_demand);
   RUN_TEST(test_espectre_component_configuration_setters_update_runtime_config);
   RUN_TEST(test_threshold_number_behaviors_cover_parent_and_no_parent_paths);
+  RUN_TEST(test_entity_commands_validate_parameters_before_runtime_callbacks);
   RUN_TEST(test_motion_hits_number_behaviors_cover_parent_and_no_parent_paths);
   RUN_TEST(test_sensing_switch_and_recalibrate_button_use_the_command_engine);
   RUN_TEST(test_sensing_switch_initial_state_matches_runtime);

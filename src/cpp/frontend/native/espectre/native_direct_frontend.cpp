@@ -104,6 +104,7 @@ void NativeDirectFrontend::refresh() {
   session_tokens_enabled_ = false;
   wifi_response_pending_ = false;
   DirectHttpServiceConfig config = DirectHttpServiceConfig::for_first_party_portals();
+  config.protocol_extension = owner_.command_capability_profile_(true).extension;
   config.device_id = owner_.device_config_.device_id;
 #if defined(CONFIG_ESPECTRE_DIRECT_DEV_ORIGINS_ENABLED) && CONFIG_ESPECTRE_DIRECT_DEV_ORIGINS_ENABLED
   config.allow_http_loopback_origins = true;
@@ -184,7 +185,7 @@ void NativeDirectFrontend::publish_event(const char *event_name, const std::stri
 std::string NativeDirectFrontend::handle_request_(const DirectRequest &request, uint64_t connection_token) {
   EspectreCommand command;
   std::string parse_error;
-  if (!direct_http_request_to_command(request, &command, &parse_error)) {
+  if (!direct_http_request_to_command(request, &command, &parse_error, owner_.command_capability_profile_(true).extension)) {
     command.command_id = request.command_id;
     command.command = request.command;
     return espectre_command_result_payload(owner_.device_config_, command, false,
@@ -208,7 +209,7 @@ IDirectHttpService::DeferredRequestResult NativeDirectFrontend::handle_deferred_
     }
     EspectreCommand command;
     std::string parse_error;
-    if (!direct_http_request_to_command(request, &command, &parse_error)) {
+    if (!direct_http_request_to_command(request, &command, &parse_error, owner_.command_capability_profile_(true).extension)) {
       command.command_id = request.command_id;
       command.command = request.command;
       return {false,

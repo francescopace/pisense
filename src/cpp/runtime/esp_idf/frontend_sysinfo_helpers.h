@@ -29,7 +29,6 @@ struct SysinfoCapabilities {
   bool supports_traffic_control{false};
   bool supports_live_telemetry{false};
   bool supports_extended_diagnostics{false};
-  bool supports_ota{false};
   bool supports_wifi_5ghz{false};
 };
 

@@ -160,7 +160,7 @@ add_espectre_test(test_device_config_store
 
 add_espectre_test(test_espectre_protocol
     "${CMAKE_CURRENT_SOURCE_DIR}/runtime/test_espectre_protocol.cpp"
-    LIBRARIES espectre_runtime_testlib
+    LIBRARIES espectre_frontend_ota_protocol_testlib
 )
 
 add_espectre_test(test_csi_pipeline
@@ -268,6 +268,6 @@ add_executable(espectre_capabilities_probe
 )
 target_link_libraries(espectre_capabilities_probe
     PRIVATE
-        espectre_runtime_testlib
+        espectre_frontend_ota_protocol_testlib
 )
 espectre_apply_coverage(espectre_capabilities_probe)
