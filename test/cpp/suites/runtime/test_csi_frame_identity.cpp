@@ -261,7 +261,25 @@ void test_external_rejects_other_mac_fragments_and_truncation(void) {
   TEST_ASSERT_FALSE(matches(invalid_header, config));
   TEST_ASSERT_FALSE(matches(incomplete_ip, config));
   TEST_ASSERT_FALSE(matches(valid, config, kMulticastMac));
-  TEST_ASSERT_FALSE(matches(udp_frame(kMulticast, 5555U), config));
+  TEST_ASSERT_FALSE(matches(udp_frame(kMulticast, 5555U), config, kOtherMac));
+}
+
+void test_external_accepts_multicast_to_local_mac_with_canonical_identity(void) {
+  CsiFrameFilterConfig config = filter(CsiTrafficMode::EXTERNAL);
+  const auto multicast = udp_frame(kMulticast, config.external_udp_port);
+  TEST_ASSERT_TRUE(matches(multicast, config));
+  TEST_ASSERT_FALSE(matches(multicast, config, kOtherMac));
+  TEST_ASSERT_FALSE(matches(udp_frame(kMulticast, config.external_udp_port, {'.'}), config));
+  TEST_ASSERT_FALSE(matches(udp_frame(kMulticast, config.external_udp_port + 1U), config));
+
+  // Different multicast groups can map to the same Ethernet multicast MAC.
+  const auto other_group = udp_frame(kMulticast ^ 0x01000000U, config.external_udp_port);
+  TEST_ASSERT_FALSE(matches(other_group, config));
+  TEST_ASSERT_FALSE(matches(other_group, config, kMulticastMac));
+
+  config.multicast_ip_addr = 0U;
+  TEST_ASSERT_FALSE(matches(multicast, config));
+  TEST_ASSERT_FALSE(matches(multicast, config, kMulticastMac));
 }
 
 void test_external_rejects_udp_length_mismatch_and_data_after_marker(void) {
@@ -360,6 +378,7 @@ int main() {
   RUN_TEST(test_lltf20_preserves_ip_traffic_provenance_filter);
   RUN_TEST(test_external_accepts_only_canonical_unicast_and_multicast_marker);
   RUN_TEST(test_external_rejects_other_mac_fragments_and_truncation);
+  RUN_TEST(test_external_accepts_multicast_to_local_mac_with_canonical_identity);
   RUN_TEST(test_external_rejects_udp_length_mismatch_and_data_after_marker);
   RUN_TEST(test_external_accepts_bounded_shifted_llc_frame);
   RUN_TEST(test_external_accepts_unicast_ping_requests);

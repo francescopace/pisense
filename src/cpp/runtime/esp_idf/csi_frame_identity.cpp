@@ -106,6 +106,8 @@ bool destination_mac_matches(const ParsedIpv4 &packet,
   }
   if (config.multicast_ip_addr == 0U ||
       packet.destination != host_ip(config.multicast_ip_addr)) return false;
+  // AP multicast-to-unicast delivery preserves the multicast IP destination.
+  if (std::memcmp(config.local_mac_addr, frame_mac, 6U) == 0) return true;
   const uint8_t expected[6] = {
       0x01U,
       0x00U,
