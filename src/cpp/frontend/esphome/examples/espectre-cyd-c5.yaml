@@ -1,0 +1,284 @@
+# ESPectre - NM-CYD-C5 (ESP32-C5 Cheap Yellow Display)
+# Extends the base ESP32-C5 config with a local 320x240 touch display.
+#
+# Board: NM-CYD-C5 (ESP32-C5-WROOM-1, 16MB Flash / 8MB PSRAM)
+# https://github.com/RockBase-iot/NM-CYD-C5
+#
+# Display design doc: docs/NM-CYD-C5/DISPLAY-NM-CYD-C5.md
+#
+# On-screen features:
+# - Scrolling Movement score curve with adaptive Threshold line
+# - MOTION / IDLE / CALIBRATING status
+# - Touch buttons: Threshold -0.05 / Recalibrate / Threshold +0.05
+#
+# Pin mapping (NM-CYD-C5, shared SPI bus):
+# - SPI:   SCK=GPIO6, MISO=GPIO2, MOSI=GPIO7
+# - LCD:   ST7789 CS=GPIO23, DC=GPIO24, RST=none, BL=GPIO25 (active HIGH)
+# - Touch: XPT2046 CS=GPIO1 (no IRQ line, polled)
+# - SD:    CS=GPIO10 (unused here, shares the same SPI bus)
+# - RGB:   WS2812 on GPIO27 (unused here)
+
+substitutions:
+  detection_algorithm: lightweight # lightweight (default) or high_accuracy
+
+packages:
+  base: !include espectre-c5.yaml
+
+# ESPectre entity IDs used by the display lambda and the touch buttons.
+#
+# IMPORTANT (shared SPI bus safety):
+# ALL espectre entity callbacks can fire from NON-main-loop tasks. Driving the
+# SPI display from any of those races the XPT2046 touchscreen, which polls the
+# SAME SPI bus from the main loop:
+#   spi_master: Cannot acquire bus when a polling transaction is in progress
+#   assert failed: spi_device_release_bus -> reboot  (observed twice)
+# Therefore NO espectre automation may call component.update on the display.
+# All redraws happen in the 1s `interval` below (main-loop context); the
+# graph lambda de-duplicates curve points, so nothing is lost.
+espectre:
+  id: espectre_csi
+  detection_algorithm: ${detection_algorithm}
+  movement_sensor:
+    id: espectre_movement_score
+  motion_sensor:
+    id: espectre_motion_detected
+  threshold_number:
+    id: espectre_threshold
+  calibration_active_sensor:
+    id: espectre_calibration_active
+  recalibrate_button:
+    id: espectre_recalibrate
+
+# Primary display refresh (main-loop context, safe to share the SPI bus with
+# the touchscreen). Curve points are only appended when a new Movement value
+# arrives, so this fixed cadence does not distort the graph.
+interval:
+  - interval: 1s
+    then:
+      - component.update: cyd_display
+
+sensor:
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    id: wifi_rssi
+    update_interval: 5s
+
+spi:
+  clk_pin: GPIO6
+  mosi_pin: GPIO7
+  miso_pin: GPIO2
+
+display:
+  - platform: mipi_spi
+    id: cyd_display
+    model: ST7789V # if your unit ships an ILI9341 panel, use model: ILI9341
+    dimensions: # post-transform (landscape) size; swap_xy swaps the native axes
+      width: 320
+      height: 240
+    color_order: RGB
+    invert_colors: false # set true if colors look inverted on your panel
+    transform: # verified on hardware: landscape 320x240, correct orientation
+      swap_xy: true
+      mirror_x: true
+      mirror_y: false
+    cs_pin: GPIO23
+    dc_pin: GPIO24
+    # no reset_pin: this board has no LCD RST line (RST=-1)
+    enable_pin: GPIO25 # backlight, active HIGH
+    data_rate: 40MHz
+    update_interval: never
+    lambda: |-
+      // ----- Movement history ring buffer (one point per published value) -----
+      const int HIST_W = 272;
+      static float hist[HIST_W];
+      static int head = 0;    // next write position
+      static int count = 0;   // valid points
+      static float last_pushed = NAN;
+      const float mv = id(espectre_movement_score).has_state() ? id(espectre_movement_score).state : NAN;
+      if (!isnan(mv) && (isnan(last_pushed) || fabsf(mv - last_pushed) > 1e-4f)) {
+        hist[head] = mv;
+        head = (head + 1) % HIST_W;
+        if (count < HIST_W) count++;
+        last_pushed = mv;
+      }
+
+      const Color C_BG(0, 0, 0);
+      const Color C_FG(255, 255, 255);
+      const Color C_DIM(140, 140, 140);
+      const Color C_CURVE(0, 220, 220);
+      const Color C_OVER(255, 60, 60);
+      const Color C_THR(255, 210, 0);
+      const Color C_OK(0, 220, 0);
+      const Color C_CAL(80, 160, 255);
+      const Color C_BTN(40, 40, 48);
+      const Color C_BTN_EDGE(90, 90, 100);
+
+      it.fill(C_BG);
+
+      const bool motion_valid = id(espectre_motion_detected).has_state();
+      const bool motion = motion_valid && id(espectre_motion_detected).state;
+      const bool calibrating = id(espectre_calibration_active).state;
+      const bool thr_valid = id(espectre_threshold).has_state();
+      const float thr = thr_valid ? id(espectre_threshold).state : 0.5f;
+
+      // ----- Header (y 0-26) -----
+      // Title slot shows the network state: IP address when connected,
+      // "NO WIFI" otherwise (fallback AP portal is at 192.168.4.1).
+      if (network::is_connected()) {
+        auto ips = network::get_ip_addresses();
+        char ipbuf[network::IP_ADDRESS_BUFFER_SIZE];
+        it.printf(6, 6, id(font_body), C_FG, "%s", ips[0].str_to(ipbuf));
+      } else {
+        it.printf(6, 6, id(font_body), C_THR, "NO WIFI");
+      }
+      if (calibrating) {
+        it.printf(120, 8, id(font_small), C_CAL, "CALIBRATING...");
+      } else if (motion) {
+        it.printf(140, 6, id(font_body), C_OVER, "MOTION");
+      } else if (motion_valid) {
+        it.printf(140, 6, id(font_body), C_OK, "IDLE");
+      } else {
+        it.printf(140, 6, id(font_body), C_THR, "BOOT");
+      }
+      it.printf(238, 8, id(font_small), C_DIM, "${detection_algorithm}");
+      it.line(0, 27, 319, 27, C_BTN_EDGE);
+
+      // ----- Graph area (x 24-295, y 30-152) -----
+      const int gx = 24, gy = 30, gw = HIST_W, gh = 122;
+      float vmax = 0.5f; // normalized threshold range is 0.0-1.0
+      if (2.0f * thr > vmax) vmax = 2.0f * thr;
+      for (int i = 0; i < count; i++) {
+        float v = hist[(head - count + i + HIST_W) % HIST_W];
+        if (v > vmax) vmax = v;
+      }
+      vmax *= 1.05f;
+
+      // Y axis labels
+      it.printf(0, gy - 4, id(font_tiny), C_DIM, "%.1f", vmax);
+      it.printf(0, gy + gh - 6, id(font_tiny), C_DIM, "0");
+
+      // Threshold dashed line
+      const int ty = gy + gh - (int)(thr / vmax * gh);
+      for (int x = gx; x < gx + gw; x += 6) {
+        it.line(x, ty, x + 3, ty, C_THR);
+      }
+      it.printf(gx + gw + 4, ty - 5, id(font_tiny), C_THR, "%.2f", thr);
+
+      // Movement curve (oldest -> newest), red where above threshold
+      for (int i = 1; i < count; i++) {
+        const float v0 = hist[(head - count + i - 1 + HIST_W) % HIST_W];
+        const float v1 = hist[(head - count + i + HIST_W) % HIST_W];
+        float c0 = v0 / vmax; if (c0 > 1.0f) c0 = 1.0f;
+        float c1 = v1 / vmax; if (c1 > 1.0f) c1 = 1.0f;
+        const int x0 = gx + i - 1, x1 = gx + i;
+        const int y0 = gy + gh - (int)(c0 * gh);
+        const int y1 = gy + gh - (int)(c1 * gh);
+        it.line(x0, y0, x1, y1, (v1 > thr) ? C_OVER : C_CURVE);
+      }
+      // Frame
+      it.line(gx, gy + gh, gx + gw, gy + gh, C_BTN_EDGE);
+      it.line(gx, gy, gx, gy + gh, C_BTN_EDGE);
+
+      // ----- Values row (y 158-186) -----
+      if (!isnan(mv)) {
+        it.printf(6, 162, id(font_value), motion ? C_OVER : C_CURVE, "%.2f", mv);
+      } else {
+        it.printf(6, 162, id(font_value), C_DIM, "--");
+      }
+      it.printf(96, 168, id(font_small), C_DIM, "mv");
+      if (thr_valid) {
+        it.printf(132, 162, id(font_value), C_THR, "%.2f", thr);
+      } else {
+        it.printf(132, 162, id(font_value), C_DIM, "--");
+      }
+      it.printf(222, 168, id(font_small), C_DIM, "thr");
+      if (id(wifi_rssi).has_state()) {
+        it.printf(252, 168, id(font_small), C_DIM, "%.0fdBm", id(wifi_rssi).state);
+      }
+
+      // ----- Touch buttons (y 190-236) -----
+      auto draw_btn = [&](int x, int w, const char *label, Color edge) {
+        it.filled_rectangle(x, 192, w, 42, C_BTN);
+        it.rectangle(x, 192, w, 42, edge);
+        it.printf(x + w / 2, 205, id(font_small), C_FG, TextAlign::TOP_CENTER, label);
+      };
+      draw_btn(8, 96, "THR -0.05", C_BTN_EDGE);
+      draw_btn(112, 96, calibrating ? "...WAIT..." : "CALIBRATE", calibrating ? C_CAL : C_BTN_EDGE);
+      draw_btn(216, 96, "THR +0.05", C_BTN_EDGE);
+
+# XPT2046 resistive touch (shares the SPI bus, CS=GPIO1, no IRQ line -> polled)
+touchscreen:
+  - platform: xpt2046
+    id: cyd_touch
+    display: cyd_display
+    cs_pin: GPIO1
+    update_interval: 50ms
+    # Raw calibration values from the NM-CYD-C5 factory demo; fine-tune if
+    # touch feels offset. transform matches the landscape display transform.
+    calibration:
+      x_min: 185
+      x_max: 3700
+      y_min: 250
+      y_max: 3800
+    transform:
+      swap_xy: true
+      mirror_x: false # touch X is opposite to display X on this unit
+      mirror_y: false
+
+binary_sensor:
+  - platform: touchscreen
+    touchscreen_id: cyd_touch
+    id: btn_thr_minus
+    internal: true
+    x_min: 8
+    x_max: 104
+    y_min: 190
+    y_max: 236
+    on_press:
+      - lambda: |-
+          if (!id(espectre_threshold).has_state()) return;
+          float t = id(espectre_threshold).state - 0.05f;
+          if (t < 0.0f) t = 0.0f;
+          auto call = id(espectre_threshold).make_call();
+          call.set_value(t);
+          call.perform();
+  - platform: touchscreen
+    touchscreen_id: cyd_touch
+    id: btn_calibrate
+    internal: true
+    x_min: 112
+    x_max: 208
+    y_min: 190
+    y_max: 236
+    on_press:
+      - button.press: espectre_recalibrate
+  - platform: touchscreen
+    touchscreen_id: cyd_touch
+    id: btn_thr_plus
+    internal: true
+    x_min: 216
+    x_max: 312
+    y_min: 190
+    y_max: 236
+    on_press:
+      - lambda: |-
+          if (!id(espectre_threshold).has_state()) return;
+          float t = id(espectre_threshold).state + 0.05f;
+          if (t > 1.0f) t = 1.0f;
+          auto call = id(espectre_threshold).make_call();
+          call.set_value(t);
+          call.perform();
+
+font:
+  - file: "gfonts://Roboto"
+    id: font_body
+    size: 16
+  - file: "gfonts://Roboto"
+    id: font_value
+    size: 24
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 14
+  - file: "gfonts://Roboto"
+    id: font_tiny
+    size: 10
