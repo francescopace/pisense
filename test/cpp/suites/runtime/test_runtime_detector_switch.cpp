@@ -50,6 +50,9 @@ class DetectorListener : public IRuntimeListener {
   }
   void on_runtime_fault(const char *) override { faults++; }
 
+  void on_live_telemetry(float, float) override { live_updates++; }
+
+  int live_updates{0};
   int detector_changes{0};
   int threshold_changes{0};
   int calibration_starts{0};
@@ -109,6 +112,60 @@ void test_runtime_detector_switch_updates_pipeline_threshold_and_calibration(voi
   TEST_ASSERT_TRUE(listener.last_calibration_success);
 }
 
+void test_runtime_readiness_requires_valid_recent_csi_and_recovers_after_quality_gap(void) {
+  RuntimeConfig config;
+  config.detection_algorithm = DetectionAlgorithm::HIGH_ACCURACY;
+  FakeCsiTrafficGenerator generator;
+  FakeCsiTrafficIngress ingress;
+  EspIdfRuntime runtime(config, generator, ingress);
+  DetectorListener listener;
+  runtime.set_listener(&listener);
+  TEST_ASSERT_TRUE(runtime.setup());
+  runtime.set_live_telemetry_enabled(true);
+  esp_netif_ip_info_t ip_info{};
+  ip_info.ip.addr = ip_info.gw.addr = 0x0101A8C0U;
+  runtime.on_wifi_connected_(ip_info);
+  TEST_ASSERT_FALSE(runtime.get_snapshot().ready_to_publish);
+  // This test isolates hardware admission and availability. Frame provenance
+  // has its own suite, so the synthetic callback needs no fabricated IP header.
+  runtime.csi_pipeline_.traffic_filter_configured_ = false;
+  int8_t payload[128];
+  std::fill_n(payload, 128, int8_t{20});
+  for (uint8_t bin : HT20_CENTERED_ONLY_NULL_BINS) {
+    payload[bin * 2] = payload[bin * 2 + 1] = 0;
+  }
+  wifi_csi_info_t info{};
+  info.buf = payload;
+  info.len = sizeof(payload);
+  info.rx_ctrl.sig_mode = 1;
+  info.rx_ctrl.channel = 1;
+  info.rx_ctrl.rssi = -40;
+  esp_timer_mock::reset(10000000, 0);
+  const auto feed = [&](unsigned count) {
+    for (unsigned i = 0; i < count; ++i) {
+      esp_timer_mock::advance(10000);
+      info.rx_ctrl.timestamp = static_cast<uint32_t>(esp_timer_mock::time_us);
+      runtime.csi_pipeline_.capture_service_.process_packet(&info);
+      runtime.loop();
+    }
+  };
+  feed(125);
+  TEST_ASSERT_TRUE(runtime.get_snapshot().ready_to_publish);
+  const int live_updates = listener.live_updates;
+  TEST_ASSERT_TRUE(live_updates > 0);
+  const float last_score = runtime.get_snapshot().movement_metric;
+  info.rx_ctrl.rx_state = 1;
+  feed(110);
+  TEST_ASSERT_FALSE(runtime.get_snapshot().ready_to_publish);
+  TEST_ASSERT_EQUAL(live_updates, listener.live_updates);
+  TEST_ASSERT_EQUAL_FLOAT(last_score, runtime.get_snapshot().movement_metric);
+  TEST_ASSERT_EQUAL(110, runtime.csi_pipeline_.capture_service_.rx_error_packets());
+  info.rx_ctrl.rx_state = 0;
+  feed(125);
+  TEST_ASSERT_TRUE(runtime.get_snapshot().ready_to_publish);
+  TEST_ASSERT_TRUE(listener.live_updates > live_updates);
+}
+
 void test_runtime_detector_configuration_preserves_the_requested_threshold(void) {
   RuntimeConfig config;
   config.detection_algorithm = DetectionAlgorithm::HIGH_ACCURACY;
@@ -126,7 +183,7 @@ void test_runtime_detector_configuration_preserves_the_requested_threshold(void)
   ip_info.ip.addr = 0x0101A8C0U;
   ip_info.gw.addr = 0x0101A8C0U;
   runtime.on_wifi_connected_(ip_info);
-  TEST_ASSERT_TRUE(runtime.get_snapshot().ready_to_publish);
+  TEST_ASSERT_FALSE(runtime.get_snapshot().ready_to_publish);
   TEST_ASSERT_EQUAL_FLOAT(0.73f, runtime.get_snapshot().threshold);
   TEST_ASSERT_EQUAL_FLOAT(0.73f, runtime.detector_->get_threshold());
 
@@ -136,7 +193,7 @@ void test_runtime_detector_configuration_preserves_the_requested_threshold(void)
   wifi_event_sta_scan_done_t scan_done{};
   esp_event_mock_emit(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, &scan_done);
   TEST_ASSERT_EQUAL(ESP_OK, runtime.wifi_lifecycle_.process_pending_events());
-  TEST_ASSERT_TRUE(runtime.get_snapshot().ready_to_publish);
+  TEST_ASSERT_FALSE(runtime.get_snapshot().ready_to_publish);
   TEST_ASSERT_EQUAL_FLOAT(0.68f, runtime.get_snapshot().threshold);
   TEST_ASSERT_EQUAL_FLOAT(0.68f, runtime.detector_->get_threshold());
 
@@ -401,7 +458,7 @@ void test_runtime_channel_change_rearms_csi_and_restarts_calibration(void) {
 
   TEST_ASSERT_TRUE(runtime.csi_pipeline_.is_enabled());
   TEST_ASSERT_TRUE(runtime.is_calibrating());
-  TEST_ASSERT_TRUE(runtime.get_snapshot().ready_to_publish);
+  TEST_ASSERT_FALSE(runtime.get_snapshot().ready_to_publish);
   TEST_ASSERT_EQUAL(MotionState::IDLE, runtime.get_snapshot().motion_state);
   TEST_ASSERT_EQUAL(1, listener.calibration_starts);
   runtime.csi_traffic_service_.stop();
@@ -455,7 +512,7 @@ void test_runtime_services_armed_preserves_wifi_ip_and_restarts_capture(void) {
   TEST_ASSERT_TRUE(g_esp_wifi_mock.csi_enabled);
   TEST_ASSERT_TRUE(g_esp_wifi_mock.csi_callback != nullptr);
   TEST_ASSERT_FALSE(g_esp_wifi_mock.promiscuous);
-  TEST_ASSERT_TRUE(runtime.get_snapshot().ready_to_publish);
+  TEST_ASSERT_FALSE(runtime.get_snapshot().ready_to_publish);
   TEST_ASSERT_TRUE(runtime.is_calibrating());
   TEST_ASSERT_EQUAL(1, listener.calibration_starts);
 
@@ -477,7 +534,7 @@ void test_runtime_services_armed_preserves_wifi_ip_and_restarts_capture(void) {
   TEST_ASSERT_TRUE(g_esp_wifi_mock.csi_enabled);
   TEST_ASSERT_TRUE(g_esp_wifi_mock.csi_callback != nullptr);
   TEST_ASSERT_FALSE(g_esp_wifi_mock.promiscuous);
-  TEST_ASSERT_TRUE(runtime.get_snapshot().ready_to_publish);
+  TEST_ASSERT_FALSE(runtime.get_snapshot().ready_to_publish);
   runtime.csi_traffic_service_.stop();
   TEST_ASSERT_EQUAL(ESP_OK, runtime.csi_pipeline_.disable());
 }
@@ -780,7 +837,7 @@ void test_runtime_channel_change_cold_resets_ml_without_calibration(void) {
 
   TEST_ASSERT_TRUE(runtime.csi_pipeline_.is_enabled());
   TEST_ASSERT_FALSE(runtime.is_calibrating());
-  TEST_ASSERT_TRUE(runtime.get_snapshot().ready_to_publish);
+  TEST_ASSERT_FALSE(runtime.get_snapshot().ready_to_publish);
   TEST_ASSERT_EQUAL(0U, runtime.detector_->get_buffer_count());
   runtime.csi_traffic_service_.stop();
 }
@@ -884,6 +941,7 @@ int main(int argc, char **argv) {
   (void)argc;
   (void)argv;
   UNITY_BEGIN();
+  RUN_TEST(test_runtime_readiness_requires_valid_recent_csi_and_recovers_after_quality_gap);
   RUN_TEST(test_runtime_reassociation_restarts_traffic_without_ip_or_channel_change);
   RUN_TEST(test_wifi_raw_switch_preserves_ml_threshold_and_recalibrates_lightweight_only);
   RUN_TEST(test_runtime_calibration_consumes_evaluations_resets_on_gaps_and_finishes);

@@ -59,9 +59,12 @@ void EspIdfRuntime::loop() {
   frontend_runtime_shim::state.loop_calls++;
   if (frontend_runtime_shim::state.emit_threshold_on_next_loop && listener_ != nullptr) {
     frontend_runtime_shim::state.emit_threshold_on_next_loop = false;
-    listener_->on_threshold_changed(frontend_runtime_shim::state.snapshot);
+    snapshot_ = frontend_runtime_shim::state.snapshot;
+    listener_->on_threshold_changed(snapshot_);
   }
 }
+
+RuntimeSnapshot EspIdfRuntime::get_snapshot() const { return snapshot_; }
 
 RuntimeDiagnosticsSnapshot EspIdfRuntime::get_diagnostics() const {
   return frontend_runtime_shim::state.diagnostics;

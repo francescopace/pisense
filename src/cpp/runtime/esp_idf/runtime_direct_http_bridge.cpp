@@ -760,6 +760,7 @@ std::string RuntimeDirectHttpBridge::diagnostics_payload_() const {
   append_uint(&out,
               "wifi_channel",
               sample != nullptr ? sample->wifi_channel : diagnostics.wifi_channel);
+  append_runtime_csi_quality_diagnostics_json(&out, diagnostics);
   append_runtime_performance_diagnostics_json(&out, diagnostics);
   if (service_ != nullptr) {
     const DirectHttpServiceDiagnostics direct = service_->diagnostics();

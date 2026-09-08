@@ -741,13 +741,17 @@ FrontendCommandResult ESpectreComponent::execute_entity_command_(const std::stri
         }
         if (read.command == "device") return espectre_device_payload(device, info);
         if (read.command == "read_diagnostics") {
-          return espectre_diagnostics_payload(device,
-                                               this->runtime_.snapshot(),
-                                               millis(),
-                                               millis() / 1000U,
-                                               0.0f,
-                                               0.0f,
-                                               this->runtime_.diagnostics_sample());
+          std::string payload = espectre_diagnostics_payload(device,
+                                                             this->runtime_.snapshot(),
+                                                             millis(),
+                                                             millis() / 1000U,
+                                                             0.0f,
+                                                             0.0f,
+                                                             this->runtime_.diagnostics_sample());
+          payload.pop_back();
+          append_runtime_csi_quality_diagnostics_json(&payload, this->runtime_.diagnostics());
+          payload += "}";
+          return payload;
         }
         if (read.command == "health") {
           return espectre_health_payload(device, true, millis());
@@ -855,6 +859,11 @@ bool ESpectreComponent::set_traffic_generator_mode_runtime(const std::string &mo
 
 void ESpectreComponent::trigger_recalibration() {
   (void) this->execute_entity_command_("recalibrate");
+}
+
+void ESpectreComponent::on_sensing_readiness_changed(const RuntimeSnapshot &snapshot) {
+  (void) snapshot;
+  (void) this->direct_bridge_.publish_changes(FrontendCommandChange::SENSING);
 }
 
 void ESpectreComponent::on_motion_state_changed(const RuntimeSnapshot &snapshot) {

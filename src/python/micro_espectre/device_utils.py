@@ -79,6 +79,7 @@ REASON_UNSUPPORTED_WIDTH = "unsupported_width"
 REASON_UNEXPECTED_LTF = "unexpected_ltf"
 REASON_UNKNOWN_LAYOUT = "unknown_layout"
 REASON_MISSING_METADATA = "missing_metadata"
+REASON_RX_ERROR = "rx_error"
 NORMALIZATION_DOUBLE_HT20 = "double_ht20"
 NORMALIZATION_HT57_TO_64 = "ht57_to_64"
 NORMALIZATION_LLTF53_TO_64 = "lltf53_to_64"
@@ -325,6 +326,9 @@ def assess_ht20_sensing_frame(frame, csi_data, *, expected_len=HT20_CSI_LEN,
     except TypeError:
         raw_len = 0
 
+    if frame_len > 21 and frame[21] != 0:
+        return build_csi_format_assessment(reason_code=REASON_RX_ERROR, raw_len=raw_len, out=out)
+
     # The live device path overwhelmingly receives full-width HT20 frames.
     # Reuse a private module mapping instead of rebuilding PHY, layout, and
     # combined mappings field by field for every CSI callback.
@@ -403,16 +407,18 @@ def is_ht20_sensing_frame(frame):
     return is_ht20_sensing_phy_fields(frame[7], frame[9])
 
 
-def _ht20_bins_with_energy(csi_data, bins):
+def _ht20_bins_with_energy(csi_data, bins, first_word_invalid=False):
     populated = 0
     for bin_index in bins:
+        if first_word_invalid and bin_index < 2:
+            continue
         byte_index = bin_index * 2
         if csi_data[byte_index] != 0 or csi_data[byte_index + 1] != 0:
             populated += 1
     return populated
 
 
-def detect_ht20_bin_layout(csi_data, expected_len=HT20_CSI_LEN):
+def detect_ht20_bin_layout(csi_data, expected_len=HT20_CSI_LEN, first_word_invalid=False):
     """Identify which HT20 bin ordering a full-width payload uses.
 
     Requires positive evidence in both directions: one guard set entirely null
@@ -426,8 +432,8 @@ def detect_ht20_bin_layout(csi_data, expected_len=HT20_CSI_LEN):
         return LAYOUT_BINS_UNKNOWN
 
     classic_energy = _ht20_bins_with_energy(csi_data, HT20_CLASSIC_ONLY_NULL_BINS)
-    centered_energy = _ht20_bins_with_energy(csi_data, HT20_CENTERED_ONLY_NULL_BINS)
-    if classic_energy == 0 and centered_energy == len(HT20_CENTERED_ONLY_NULL_BINS):
+    centered_energy = _ht20_bins_with_energy(csi_data, HT20_CENTERED_ONLY_NULL_BINS, first_word_invalid)
+    if classic_energy == 0 and centered_energy == len(HT20_CENTERED_ONLY_NULL_BINS) - int(first_word_invalid):
         return LAYOUT_BINS_CLASSIC
     if centered_energy == 0 and classic_energy == len(HT20_CLASSIC_ONLY_NULL_BINS):
         return LAYOUT_BINS_CENTERED
@@ -479,7 +485,8 @@ def _resolve_ht20_bin_layout_once(payload, expected_len, bin_layout, state):
 
 
 def normalize_ht20_csi_payload(csi_data, expected_len=128, remap_buffer=None,
-                               bin_layout=None, assessment=None, state=None):
+                               bin_layout=None, assessment=None, state=None,
+                               first_word_invalid=False):
     """Normalize supported CSI payload layouts to one HT20 payload.
 
     ``bin_layout`` carries the caller's latched ordering. Detection needs a fully
@@ -502,6 +509,22 @@ def normalize_ht20_csi_payload(csi_data, expected_len=128, remap_buffer=None,
     normalization_id = assessment["normalization_id"]
     if assessment["reason_code"] != REASON_NONE:
         return None, raw_len, None
+
+    if first_word_invalid:
+        # The first two pairs of compact or classic-order frames include live
+        # tones. Only full-width centered frames can be cleaned losslessly.
+        if expected_len != HT20_CSI_LEN or raw_len not in (128, 256):
+            return None, raw_len, None
+        resolved = detect_ht20_bin_layout(memoryview(csi_data)[:128], first_word_invalid=True)
+        if resolved != LAYOUT_BINS_CENTERED:
+            return None, raw_len, None
+        if remap_buffer is None or len(remap_buffer) != expected_len:
+            remap_buffer = bytearray(expected_len)
+        remap_buffer[:] = memoryview(csi_data)[:expected_len]
+        remap_buffer[:4] = b"\x00" * 4
+        if state is not None:
+            state.bin_layout = resolved
+        return remap_buffer, raw_len, normalization_id
 
     if normalization_id == NORMALIZATION_DOUBLE_HT20:
         collapsed = memoryview(csi_data)[:expected_len]

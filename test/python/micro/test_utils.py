@@ -797,3 +797,35 @@ class TestExtractAmplitudesAndPhases:
         for i in range(len(amps_combined)):
             assert amps_combined[i] == pytest.approx(amps_separate[i], rel=1e-6)
             assert phases_combined[i] == pytest.approx(phases_separate[i], rel=1e-6)
+
+
+class TestInvalidFirstCsiWord:
+    """Hardware-invalid pairs must never become live detector input."""
+
+    @pytest.mark.parametrize('length', [128, 256])
+    def test_centered_guard_bytes_are_cleaned_without_changing_live_pairs(self, length):
+        payload = _layout_packet(HT20_CENTERED_ONLY_NULL_BINS) * (length // 128)
+        payload[:4] = b'\x7f\x80\x7f\x80'
+        original = bytes(payload)
+        normalized, raw_len, _ = normalize_ht20_csi_payload(payload, first_word_invalid=True)
+        assert raw_len == length
+        assert normalized[:4] == b'\x00' * 4
+        assert normalized[4:] == payload[4:128]
+        assert bytes(payload) == original
+
+    @pytest.mark.parametrize('length', [106, 114, 228])
+    def test_compact_invalid_live_pairs_are_rejected(self, length):
+        assert normalize_ht20_csi_payload(bytearray([7] * length), first_word_invalid=True)[0] is None
+
+    def test_classic_and_ambiguous_invalid_pairs_are_rejected(self):
+        for payload in (_layout_packet(HT20_CLASSIC_ONLY_NULL_BINS), bytearray(128)):
+            assert normalize_ht20_csi_payload(payload, first_word_invalid=True)[0] is None
+
+
+def test_hardware_rx_error_is_rejected_before_fast_path():
+    frame = [0] * 22
+    frame[7] = 1
+    frame[21] = 1
+    result = assess_ht20_sensing_frame(frame, bytearray(128), static_fast_path=True)
+    assert result['disposition'] == 'drop'
+    assert result['reason_code'] == 'rx_error'

@@ -6,6 +6,8 @@
  * Commercial licensing available under separate agreement; see LICENSING.md.
  */
 #include "test_harness.h"
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include <cerrno>
 #include <cstdlib>
@@ -935,6 +937,34 @@ void test_raw_session_has_no_bind_timeout() {
                     static_cast<uint8_t>(stopped_reason));
 }
 
+void test_empty_raw_session_closes_when_peer_disconnects() {
+  httpd_mock_reset();
+  EspIdfDirectHttpService service;
+  TEST_ASSERT_TRUE(service.setup(config(), [](const DirectRequest &) { return std::string("{}"); }, {}));
+  int sockets[2];
+  TEST_ASSERT_EQUAL(0, socketpair(AF_UNIX, SOCK_STREAM, 0, sockets));
+  RawCsiSessionConfig session{};
+  session.session_id[0] = 1U;
+  RawCsiStopReason stopped_reason = RawCsiStopReason::INTERNAL_ERROR;
+  accept_raw_open(&service, session,
+                  [&stopped_reason](RawCsiStopReason reason) { stopped_reason = reason; });
+  httpd_mock_set_header("Origin", "https://espectre.dev");
+  httpd_req_t raw_request = request_for(2U, sockets[0]);
+  TEST_ASSERT_EQUAL(ESP_OK, dispatch_request(&raw_request));
+  service.loop();
+  TEST_ASSERT_TRUE(service.raw_diagnostics().active);
+  // An idle connected peer is not a failure, even when no CSI is available.
+  service.loop();
+  TEST_ASSERT_TRUE(service.raw_diagnostics().active);
+  close(sockets[1]);
+  service.loop();
+  service.loop();
+  TEST_ASSERT_FALSE(service.raw_diagnostics().active);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(RawCsiStopReason::RAW_DISCONNECTED),
+                    static_cast<uint8_t>(stopped_reason));
+  close(sockets[0]);
+}
+
 void test_raw_send_failure_accounts_batch_and_stops_slow_client() {
   httpd_mock_reset();
   esp_timer_mock::reset(100000U, 0U);
@@ -1043,6 +1073,7 @@ int main() {
   RUN_TEST(test_second_raw_get_is_rejected_while_the_first_open_is_pending);
   RUN_TEST(test_raw_ring_drops_new_record_and_accounts_every_offer);
   RUN_TEST(test_raw_session_has_no_bind_timeout);
+  RUN_TEST(test_empty_raw_session_closes_when_peer_disconnects);
   RUN_TEST(test_raw_send_failure_accounts_batch_and_stops_slow_client);
   RUN_TEST(test_raw_stop_accounts_records_accepted_but_not_sent);
   RUN_TEST(test_raw_assigns_sequence_before_rejecting_an_invalid_offer);

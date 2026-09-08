@@ -46,13 +46,14 @@ void EspIdfRuntime::notify_threshold_if_changed_(float threshold) {
   snapshot_.threshold = threshold;
   config_.segmentation_threshold = threshold;
   if (listener_ != nullptr) {
-    listener_->on_threshold_changed(snapshot_);
+    listener_->on_threshold_changed(get_snapshot());
   }
 }
 
 void EspIdfRuntime::update_live_telemetry_callback_() {
   if (live_telemetry_enabled_) {
     csi_pipeline_.set_live_telemetry_callback([this](float movement, float threshold) {
+      snapshot_.movement_metric = movement;
       notify_threshold_if_changed_(threshold);
       if (listener_ != nullptr) {
         listener_->on_live_telemetry(movement, threshold);
@@ -245,6 +246,16 @@ void EspIdfRuntime::loop() {
   }
 }
 
+RuntimeSnapshot EspIdfRuntime::get_snapshot() const {
+  RuntimeSnapshot result = snapshot_;
+  // The internal publishing gate also serves calibration and lifecycle work.
+  // Public readiness additionally requires a current, valid detector window.
+  result.ready_to_publish = result.ready_to_publish && !result.calibrating &&
+      detector_ != nullptr && detector_->is_ready() &&
+      csi_pipeline_.has_current_detector_input(static_cast<int64_t>(monotonic_now_us()));
+  return result;
+}
+
 RuntimeDiagnosticsSnapshot EspIdfRuntime::get_diagnostics() const {
   RuntimeDiagnosticsSnapshot diagnostics = EspIdfRuntimeBase::get_diagnostics();
   diagnostics.wifi_rssi_dbm = wifi_rssi_dbm_;
@@ -256,6 +267,13 @@ RuntimeDiagnosticsSnapshot EspIdfRuntime::get_diagnostics() const {
   diagnostics.csi_accepted_total = csi_pipeline_.accepted_packets_total();
   diagnostics.csi_admitted_total = csi_pipeline_.detector_admitted_packets_total();
   diagnostics.csi_filtered_total = csi_pipeline_.capture_filtered_packets_total();
+  diagnostics.csi_rx_error_total = csi_pipeline_.capture_rx_error_total();
+  diagnostics.csi_rx_end_error_total = csi_pipeline_.capture_rx_end_error_total();
+  diagnostics.csi_invalid_estimate_total = csi_pipeline_.capture_invalid_estimate_total();
+  diagnostics.csi_invalid_first_word_total = csi_pipeline_.capture_invalid_first_word_total();
+  diagnostics.csi_sanitized_first_word_total = csi_pipeline_.capture_sanitized_first_word_total();
+  diagnostics.csi_estimate_length_mismatch_total = csi_pipeline_.capture_estimate_length_mismatch_total();
+
   diagnostics.csi_pending_frame_drops_total = csi_pipeline_.pending_frame_drops_total();
   diagnostics.csi_missing_slots_total = csi_pipeline_.detector_missing_slots_total();
   diagnostics.csi_excess_total = csi_pipeline_.detector_excess_packets_total();
@@ -327,7 +345,7 @@ bool EspIdfRuntime::set_threshold_runtime(float threshold) {
   config_.segmentation_threshold = threshold;
   snapshot_.threshold = threshold;
   if (listener_ != nullptr) {
-    listener_->on_threshold_changed(snapshot_);
+    listener_->on_threshold_changed(get_snapshot());
   }
   ESPECTRE_LOGD(RUNTIME_TAG, "Threshold updated to %.6f (session-only, recalculated at boot)", threshold);
   return true;
@@ -463,8 +481,8 @@ bool EspIdfRuntime::set_detection_algorithm_runtime(DetectionAlgorithm algorithm
   snapshot_.motion_state = MotionState::IDLE;
 
   if (listener_ != nullptr) {
-    listener_->on_detector_changed(snapshot_);
-    listener_->on_threshold_changed(snapshot_);
+    listener_->on_detector_changed(get_snapshot());
+    listener_->on_threshold_changed(get_snapshot());
   }
   ESPECTRE_LOGI(RUNTIME_TAG, "Detector changed to %s", detection_algorithm_name(algorithm));
 
@@ -561,7 +579,7 @@ bool EspIdfRuntime::stop_raw_collection(RawCsiStopReason reason) {
   if (services_armed_ && wifi_ready_ && wifi_ip_info_.ip.addr != 0U) {
     start_sensing_services_(wifi_ip_info_);
   } else if (listener_ != nullptr) {
-    listener_->on_motion_state_changed(snapshot_);
+    listener_->on_motion_state_changed(get_snapshot());
   }
   return true;
 }
@@ -673,7 +691,7 @@ void EspIdfRuntime::cancel_calibration_(bool notify_listener) {
   snapshot_.calibration_packets = 0U;
   snapshot_.calibration_target_packets = 0U;
   if (was_calibrating && notify_listener && listener_ != nullptr) {
-    listener_->on_calibration_finished(snapshot_, false);
+    listener_->on_calibration_finished(get_snapshot(), false);
   }
 }
 
@@ -786,7 +804,7 @@ void EspIdfRuntime::start_sensing_services_(const esp_netif_ip_info_t &ip_info) 
   csi_pipeline_.set_motion_state_callback([this](MotionState state) {
     snapshot_.motion_state = state;
     if (snapshot_.ready_to_publish && listener_ != nullptr) {
-      listener_->on_motion_state_changed(snapshot_);
+      listener_->on_motion_state_changed(get_snapshot());
     }
   });
   refresh_csi_local_identity_(ip_info.ip.addr);
@@ -817,7 +835,7 @@ void EspIdfRuntime::start_sensing_services_(const esp_netif_ip_info_t &ip_info) 
       if (snapshot_.ready_to_publish) {
         log_periodic_status_(packets_received);
         if (listener_ != nullptr) {
-          listener_->on_periodic_update(snapshot_, packets_received);
+          listener_->on_periodic_update(get_snapshot(), packets_received);
         }
       }
     }, profile);
@@ -853,7 +871,7 @@ void EspIdfRuntime::stop_sensing_services_() {
   snapshot_.ready_to_publish = false;
   snapshot_.motion_state = MotionState::IDLE;
   if (listener_ != nullptr) {
-    listener_->on_motion_state_changed(snapshot_);
+    listener_->on_motion_state_changed(get_snapshot());
   }
 }
 
@@ -883,7 +901,7 @@ void EspIdfRuntime::on_csi_channel_changed_(uint8_t previous_channel, uint8_t cu
   snapshot_.ready_to_publish = false;
   snapshot_.motion_state = MotionState::IDLE;
   if (listener_ != nullptr) {
-    listener_->on_motion_state_changed(snapshot_);
+    listener_->on_motion_state_changed(get_snapshot());
   }
   if (disable_err != ESP_OK) {
     char message[96];
@@ -913,8 +931,8 @@ bool EspIdfRuntime::start_calibration_(bool reset_high_accuracy_threshold) {
     snapshot_.calibration_packets = 0U;
     snapshot_.calibration_target_packets = 0U;
     if (listener_ != nullptr) {
-      listener_->on_threshold_changed(snapshot_);
-      listener_->on_calibration_finished(snapshot_, true);
+      listener_->on_threshold_changed(get_snapshot());
+      listener_->on_calibration_finished(get_snapshot(), true);
     }
     return true;
   }
@@ -932,7 +950,7 @@ bool EspIdfRuntime::start_calibration_(bool reset_high_accuracy_threshold) {
     snapshot_.calibration_packets = 0U;
     snapshot_.calibration_target_packets = static_cast<uint16_t>(calibration_target_packets);
     if (listener_ != nullptr) {
-      listener_->on_calibration_started(snapshot_);
+      listener_->on_calibration_started(get_snapshot());
     }
   }
 
@@ -1045,7 +1063,7 @@ void EspIdfRuntime::finish_threshold_calibration_(bool success) {
       snapshot_.startup_threshold = applied_threshold;
       snapshot_.threshold = applied_threshold;
       if (listener_ != nullptr) {
-        listener_->on_threshold_changed(snapshot_);
+        listener_->on_threshold_changed(get_snapshot());
       }
       ESPECTRE_LOGD(RUNTIME_TAG, "Adaptive threshold: %.6f (shared proposal %.6f)",
                applied_threshold, adaptive_threshold);
@@ -1054,7 +1072,7 @@ void EspIdfRuntime::finish_threshold_calibration_(bool success) {
   }
 
   if (listener_ != nullptr) {
-    listener_->on_calibration_finished(snapshot_, success);
+    listener_->on_calibration_finished(get_snapshot(), success);
   }
   ESPECTRE_LOGD(RUNTIME_TAG, "Calibration %s", success ? "completed successfully" : "failed");
   threshold_calibrator_.reset();

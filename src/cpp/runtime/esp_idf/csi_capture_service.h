@@ -60,6 +60,24 @@ class CsiCaptureService {
   uint32_t missing_metadata_packets() const {
     return missing_metadata_packets_.load(std::memory_order_relaxed);
   }
+  uint32_t rx_error_packets() const {
+    return rx_error_packets_.load(std::memory_order_relaxed);
+  }
+  uint32_t rx_end_error_packets() const {
+    return rx_end_error_packets_.load(std::memory_order_relaxed);
+  }
+  uint32_t invalid_estimate_packets() const {
+    return invalid_estimate_packets_.load(std::memory_order_relaxed);
+  }
+  uint32_t invalid_first_word_packets() const {
+    return invalid_first_word_packets_.load(std::memory_order_relaxed);
+  }
+  uint32_t sanitized_first_word_packets() const {
+    return sanitized_first_word_packets_.load(std::memory_order_relaxed);
+  }
+  uint32_t estimate_length_mismatch_packets() const {
+    return estimate_length_mismatch_packets_.load(std::memory_order_relaxed);
+  }
   uint32_t normalization_collapse_packets() const {
     return normalization_collapse_packets_.load(std::memory_order_relaxed);
   }
@@ -117,6 +135,13 @@ class CsiCaptureService {
   std::atomic<uint32_t> unknown_layout_packets_{0U};
   std::atomic<uint32_t> bad_length_packets_{0U};
   std::atomic<uint32_t> missing_metadata_packets_{0U};
+  std::atomic<uint32_t> rx_error_packets_{0U};
+  std::atomic<uint32_t> rx_end_error_packets_{0U};
+  std::atomic<uint32_t> invalid_estimate_packets_{0U};
+  std::atomic<uint32_t> invalid_first_word_packets_{0U};
+  std::atomic<uint32_t> sanitized_first_word_packets_{0U};
+  std::atomic<uint32_t> estimate_length_mismatch_packets_{0U};
+
   std::atomic<uint32_t> normalization_collapse_packets_{0U};
   std::atomic<uint32_t> normalization_remap_packets_{0U};
   std::atomic<uint32_t> enable_attempts_{0U};

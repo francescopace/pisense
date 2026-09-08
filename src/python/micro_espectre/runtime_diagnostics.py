@@ -105,43 +105,27 @@ def wifi_rssi_dbm(wlan):
         return None
 
 
+def _wifi_csi_counter(wlan, name, default=0):
+    try:
+        getter = getattr(wlan, name, None)
+        return max(0, int(getter())) if callable(getter) else default
+    except (AttributeError, OSError, TypeError, ValueError):
+        return default
+
+
 def wifi_csi_dropped(wlan):
     """Return the cumulative native CSI ring-buffer drop count."""
-    if wlan is None:
-        return 0
-    try:
-        get_dropped = getattr(wlan, "csi_dropped", None)
-        if not callable(get_dropped):
-            return 0
-        return max(0, int(get_dropped()))
-    except (AttributeError, OSError, TypeError, ValueError):
-        return 0
+    return _wifi_csi_counter(wlan, "csi_dropped")
 
 
 def wifi_csi_callbacks(wlan):
     """Return native CSI callback invocations, or None on older firmware."""
-    if wlan is None:
-        return None
-    try:
-        get_callbacks = getattr(wlan, "csi_callbacks", None)
-        if not callable(get_callbacks):
-            return None
-        return max(0, int(get_callbacks()))
-    except (AttributeError, OSError, TypeError, ValueError):
-        return None
+    return _wifi_csi_counter(wlan, "csi_callbacks", None)
 
 
 def wifi_csi_available(wlan):
     """Return the number of complete records waiting in the native CSI ring."""
-    if wlan is None:
-        return 0
-    try:
-        get_available = getattr(wlan, "csi_available", None)
-        if not callable(get_available):
-            return 0
-        return max(0, int(get_available()))
-    except (AttributeError, OSError, TypeError, ValueError):
-        return 0
+    return _wifi_csi_counter(wlan, "csi_available")
 
 
 def collect_runtime_diagnostics_snapshot(
@@ -159,6 +143,7 @@ def collect_runtime_diagnostics_snapshot(
     wifi_channel=0,
     rssi_dbm=None,
     out=None,
+    wlan=None,
 ):
     """Build the cumulative counter snapshot consumed by the rate sampler."""
     traffic_packets_total = 0
@@ -175,7 +160,7 @@ def collect_runtime_diagnostics_snapshot(
     out["csi_callbacks_total"] = int(callback_total)
     out["csi_accepted_total"] = int(accepted_total)
     out["csi_admitted_total"] = int(admitted_total)
-    out["csi_filtered_total"] = int(filtered_total)
+    out["csi_filtered_total"] = int(filtered_total) + _wifi_csi_counter(wlan, "csi_filtered")
     out["csi_missing_slots_total"] = int(missing_slots_total)
     out["csi_excess_total"] = int(excess_total)
     out["csi_stale_total"] = int(stale_total)

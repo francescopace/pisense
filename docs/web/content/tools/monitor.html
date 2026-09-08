@@ -89,7 +89,7 @@
                   </div>
                   <div class="field" data-device-command="update_sensing">
                     <label for="sense-generator-mode">Built-in traffic type</label>
-                    <select id="sense-generator-mode"><option value="ping">Ping (ICMP)</option><option value="dns">DNS (UDP)</option><option value="dns_tcp">DNS (TCP)</option><option value="wifi_raw">Wi-Fi raw (Null Data to AP)</option></select>
+                    <select id="sense-generator-mode"><option value="ping">Ping (ICMP)</option><option value="dns">DNS (UDP)</option><option value="dns_tcp">DNS (TCP)</option><option value="wifi_raw">Wi-Fi raw (Experimental)</option></select>
                   </div>
                 </div>
               </details>
@@ -103,9 +103,9 @@
         <div class="diag-grid mon-stats-tiles">
           <div class="stat"><div class="stat-label">Traffic TX</div><div class="stat-value js-mon-traffic">—</div></div>
           <div class="stat"><div class="stat-label">CSI callbacks</div><div class="stat-value js-mon-callbacks">—</div></div>
-          <div class="stat"><div class="stat-label">CSI filtered</div><div class="stat-value js-mon-filtered">—</div></div>
-          <div class="stat"><div class="stat-label">CSI admitted</div><div class="stat-value js-mon-admitted">—</div></div>
-          <div class="stat"><div class="stat-label">Wi-Fi channel</div><div class="stat-value js-mon-channel">—</div></div>
+          <div class="stat"><div class="stat-label">CSI accepted</div><div class="stat-value js-mon-accepted">—</div></div>
+          <div class="stat" title="Cumulative hardware-quality rejections: RX errors, RX end errors, invalid estimates, and invalid first words. Includes background traffic; excludes other filtering reasons."><div class="stat-label">CSI errors</div><div class="stat-value js-mon-errors">—</div></div>
+          <div class="stat"><div class="stat-label">CSI occupancy</div><div class="stat-value js-mon-occupancy">—</div></div>
           <div class="stat"><div class="stat-label">Wi-Fi RSSI</div><div class="stat-value js-mon-rssi">—</div></div>
           <div class="stat"><div class="stat-label">Free heap</div><div class="stat-value js-mon-heap">—</div></div>
           <div class="stat"><div class="stat-label">Loop time</div><div class="stat-value js-mon-loop">—</div></div>

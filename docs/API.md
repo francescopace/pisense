@@ -90,7 +90,7 @@ The CSI feature is named `csi`. Clients must tolerate additive resources, operat
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `enabled` | boolean | Desired sensing state |
-| `ready` | boolean | Detector output may be consumed |
+| `ready` | boolean | Detector output may be consumed: calibration is complete, the detector window is valid, and admitted input is newer than one detector window |
 | `calibrating` | boolean | Calibration is active |
 | `mode` | string | `sensing` or `csi_collection` |
 | `derived_events_paused` | boolean | Motion and other derived events are suspended |
@@ -98,7 +98,7 @@ The CSI feature is named `csi`. Clients must tolerate additive resources, operat
 | `threshold` | number | Current detector threshold in `[0.0, 1.0]` |
 | `motion_on_hits`, `motion_off_hits` | integer | Consecutive evaluations required for each state transition |
 | `csi_traffic_mode` | string | `internal` or `external` |
-| `traffic_generator_mode` | string | `ping`, `dns`, `dns_tcp`, or `wifi_raw` |
+| `traffic_generator_mode` | string | `ping`, `dns`, `dns_tcp`, or `wifi_raw` (experimental; see [SETUP.md](SETUP.md#traffic-generation)) |
 | `csi_target_pps` | integer | Configured CSI traffic target in packets per second |
 | `csi_traffic_udp_port` | integer, optional | External CSI traffic UDP port |
 | `csi_traffic_multicast_group` | string, optional | External CSI traffic multicast group |
@@ -157,6 +157,9 @@ OTA is a frontend-owned extension of the canonical message model. Native registe
 | `loop_samples`, `loop_avg_us`, `loop_max_us` | Runtime loop timing for that window |
 | `detection_timing_supported`, `detection_samples`, `detection_sum_us`, `detection_avg_us`, `detection_min_us`, `detection_max_us` | Detector timing support and aggregates |
 | `traffic_packets_total`, `csi_callbacks_total`, `csi_classified_total`, `csi_provenance_rejected_total`, `csi_accepted_total`, `csi_admitted_total`, `csi_filtered_total` | Cumulative traffic and CSI pipeline counters |
+| `csi_rx_error_total`, `csi_rx_end_error_total`, `csi_invalid_estimate_total`, `csi_invalid_first_word_total` | Cumulative capture-quality rejections; one reason per rejected callback |
+| `csi_sanitized_first_word_total` | Frames whose hardware-invalid guard pairs were zeroed without changing live tones |
+| `csi_estimate_length_mismatch_total` | Valid hardware estimates whose reported length differs from the original CSI buffer; diagnostic only |
 | `csi_pending_frame_drops_total`, `csi_missing_slots_total`, `csi_excess_total`, `csi_stale_total`, `csi_out_of_order_total` | Cumulative queue and temporal-admission drop counters |
 | `csi_occupancy_slots`, `csi_window_slots`, `csi_pending_frames`, `csi_pending_frame_capacity` | Detector-window and callback-queue occupancy |
 | CSI and traffic fields ending in `_pps`, plus `csi_occupancy` | Cached packet rates and detector-window occupancy ratio |
@@ -194,7 +197,7 @@ Operations reject unknown fields. Routes described as taking no parameters accep
 | `threshold` | finite number in `[0.0, 1.0]` |
 | `motion_on_hits`, `motion_off_hits` | integers from `1` through `20`; both must be present together |
 | `csi_traffic_mode` | `internal` or `external` |
-| `traffic_generator_mode` | `ping`, `dns`, `dns_tcp`, or `wifi_raw` |
+| `traffic_generator_mode` | `ping`, `dns`, `dns_tcp`, or `wifi_raw` (experimental; see [SETUP.md](SETUP.md#traffic-generation)) |
 
 The request is parsed and all field constraints and capabilities are checked before changes are applied. Success returns HTTP `200` and publishes `sensing`. `POST /sensing/calibrations` takes no parameters, returns HTTP `202` when queued, and returns `409` with code `busy` when calibration is already active.
 
@@ -275,9 +278,17 @@ Each SSE connection receives a `: heartbeat` comment every 10 seconds. There is 
 
 The C++ runtime requires sensing services to be armed before collection starts. If sensing is disabled or services are suspended for reconfiguration or maintenance, opening collection fails without re-enabling CSI capture or traffic generation. An accepted collection pauses derived sensing while retaining the active capture and traffic services.
 
+Capture validates hardware quality before normalization, calibration, sensing, or collection, independently of the traffic generator. A nonzero `rx_state` rejects the packet on every supported chip. On HE-capable chips (C5/C6), a nonzero `rxend_state` or a cleared `rx_channel_estimate_info_vld` also rejects it. Unsupported metadata fields are not read on classic chips. Hardware estimate length is compared with the original buffer length for diagnostics, not with the normalized 128-byte payload.
+
+MicroPython includes native hardware-quality rejections in `csi_filtered_total` and `csi_filtered_pps`, and counts those callbacks in `csi_callbacks_total`. Native ring overflow remains separate from quality rejection; per-reason quality counters are available on the C++ frontends.
+
+`first_word_invalid` identifies the first four source bytes, not the first four normalized bytes. A frame is retained only when its full-width centered ordering can be identified independently of those bytes: the invalid guard pairs are zeroed in a private buffer. Compact, classic-order, and ambiguous flagged frames are rejected because their invalid pairs may affect live tones. No replacement live tones are synthesized. Quality-drop counters cover all capture callbacks, including background traffic, and do not by themselves identify generator-specific failures. Quality errors take priority over missing or malformed payloads and do not participate in the format-drop reset streak; valid-stream gaps remain subject to temporal admission. RSSI and sequence metadata are not additional validity gates.
+
+The public CSI record format is unchanged. Filtered streams may have fewer usable packets, including no usable packets if the hardware reports invalid estimates for the selected source. This is not a quiet measurement, and the runtime does not silently select another generator. Detailed hardware metadata is not added to collected datasets.
+
 Each CSI V8 record retains the established 60-byte little-endian HTTP prefix. The client adopts the 16-byte session identifier from the first frame and rejects a change within the same connection. The producer preserves order; fixed-ring drops remain observable in the transport counters.
 
-While CSI is active, sensing reports `csi_collection`, readiness is false, and motion plus all present or future derived events are paused on every transport. Control and resource events remain available. A second `/csi` request and sensing, Wi-Fi, or OTA mutations return `409`. On close, the runtime restores its prior state, recalibrates when required, and resumes derived events only after readiness returns. When external traffic is configured, the host traffic generator must start before opening `/csi`.
+While CSI is active, sensing reports `csi_collection`, readiness is false, and motion plus all present or future derived events are paused on every transport. Control and resource events remain available. A second `/csi` request and sensing, Wi-Fi, or OTA mutations return `409`. On close, the runtime restores its prior state, recalibrates when required, and resumes derived events only after readiness returns. The raw worker also detects a disconnected client when no CSI records are available; it closes the session without synthesizing records. When external traffic is configured, the host traffic generator must start before opening `/csi`.
 
 ## MQTT
 

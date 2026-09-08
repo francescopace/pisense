@@ -35,7 +35,7 @@ MICROPYTHON_REPOSITORY = "https://github.com/micropython/micropython.git"
 MICROPYTHON_COMMIT = "1c3c201149f37fe8d81246191b3127bb198d6306"
 MICROPYTHON_LIB_REPOSITORY = "https://github.com/micropython/micropython-lib.git"
 MICROPYTHON_LIB_COMMIT = "ee4bb8ff139e24c42b739935fbd8ec7c4d061e02"
-MICROPYTHON_PATCH_REVISION = "app-identity-v4"
+MICROPYTHON_PATCH_REVISION = "csi-quality-v2"
 PROJECT_FIRMWARE_PROJECT_NAME = "micro-espectre"
 PROJECT_FIRMWARE_BOARDS = {
     "esp32": "ESP32_MICRO_ESPECTRE",
@@ -774,6 +774,91 @@ MP_DEFINE_CONST_FUN_OBJ_1(network_wlan_csi_rearm_obj, network_wlan_csi_rearm);
         )
 
 
+def _configure_project_csi_quality(micropython_dir: Path) -> None:
+    """Reject invalid hardware estimates before publishing a MicroPython frame."""
+    esp32_dir = micropython_dir / "ports" / "esp32"
+    path = esp32_dir / "network_wlan_csi.c"
+    source = path.read_text(encoding="utf-8")
+    marker = "// ESPectre CSI quality admission."
+    if marker in source:
+        return
+    signature = "static void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info) {\n"
+    copy = "memcpy(frame.data, info->buf, frame.len);"
+    counter = "    __atomic_fetch_add(&state->callbacks, 1, __ATOMIC_RELAXED);\n"
+    field = "    volatile uint32_t callbacks;\n"
+    reset = "    state->callbacks = 0;\n"
+    getter_start = "static mp_obj_t network_wlan_csi_callbacks("
+    getter_end = "MP_DEFINE_CONST_FUN_OBJ_1(network_wlan_csi_callbacks_obj, network_wlan_csi_callbacks);"
+    if any(anchor not in source for anchor in
+           (signature, copy, counter, field, reset, getter_start, getter_end)):
+        raise RuntimeError(f"MicroPython CSI quality admission anchors are missing: {path}")
+    admission = """// ESPectre CSI quality admission.
+static bool espectre_csi_quality_valid(const wifi_csi_info_t *info) {
+    if (info == NULL || info->buf == NULL || info->len == 0 || (info->len & 1) ||
+        info->rx_ctrl.rx_state != 0) {
+        return false;
+    }
+    #if CONFIG_SOC_WIFI_HE_SUPPORT
+    if (info->rx_ctrl.rxend_state != 0 || !info->rx_ctrl.rx_channel_estimate_info_vld) {
+        return false;
+    }
+    #endif
+    if (info->first_word_invalid) {
+        // Only independently identified, full-width centered guards can be
+        // cleaned. Compact and classic-order first pairs contain live tones.
+        if (info->len != 128 && info->len != 256) {
+            return false;
+        }
+        static const uint8_t guard_bins[] = {2, 3, 61, 62, 63};
+        static const uint8_t live_bins[] = {29, 30, 31, 33, 34, 35};
+        for (unsigned i = 0; i < sizeof(guard_bins); ++i) {
+            const unsigned offset = guard_bins[i] * 2;
+            if (info->buf[offset] != 0 || info->buf[offset + 1] != 0) {
+                return false;
+            }
+        }
+        for (unsigned i = 0; i < sizeof(live_bins); ++i) {
+            const unsigned offset = live_bins[i] * 2;
+            if (info->buf[offset] == 0 && info->buf[offset + 1] == 0) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+"""
+    source = source.replace(signature, admission + signature, 1)
+    source = source.replace(counter, counter + "    if (!espectre_csi_quality_valid(info)) {\n"
+                            "        __atomic_fetch_add(&state->filtered, 1, __ATOMIC_RELAXED);\n"
+                            "        return;\n"
+                            "    }\n", 1)
+    source = source.replace(copy, copy + "\n        if (info->first_word_invalid) {\n"
+                            "            memset(frame.data, 0, frame.len < 4 ? frame.len : 4);\n"
+                            "        }", 1)
+    source = source.replace(field, field + "    volatile uint32_t filtered;\n", 1)
+    source = source.replace(reset, reset + "    state->filtered = 0;\n")
+    # Keep native counter reads and MicroPython registration identical.
+    getter = source[source.index(getter_start):source.index(getter_end) + len(getter_end)]
+    source = source.replace(getter, getter + "\n\n" + getter.replace("callbacks", "filtered"), 1)
+    registrations = (
+        (esp32_dir / "network_wlan_csi.h",
+         "MP_DECLARE_CONST_FUN_OBJ_1(network_wlan_csi_callbacks_obj);"),
+        (esp32_dir / "network_wlan.c",
+         "    { MP_ROM_QSTR(MP_QSTR_csi_callbacks), MP_ROM_PTR(&network_wlan_csi_callbacks_obj) },"),
+    )
+    updates = []
+    for registration_path, anchor in registrations:
+        content = registration_path.read_text(encoding="utf-8")
+        if anchor not in content:
+            raise RuntimeError(f"MicroPython CSI counter registration anchor is missing: {registration_path}")
+        updates.append((registration_path, content.replace(
+            anchor, anchor + "\n" + anchor.replace("callbacks", "filtered"), 1)))
+    for registration_path, content in updates:
+        registration_path.write_text(content, encoding="utf-8")
+    path.write_text(source, encoding="utf-8")
+
+
 def _configure_project_csi_fixed_records(micropython_dir: Path) -> None:
     """Use one fixed ring stride selected by the runtime payload bound."""
     source_path = micropython_dir / "ports" / "esp32" / "network_wlan_csi.c"
@@ -1324,6 +1409,7 @@ def _build_project_firmware_locked(
     _configure_project_csi_capture(micropython_dir, chip)
     _configure_project_csi_rearm(micropython_dir)
     _configure_project_csi_fixed_records(micropython_dir)
+    _configure_project_csi_quality(micropython_dir)
     _configure_project_gc_heap_reserve(micropython_dir)
     _configure_project_wifi_channel_pin(micropython_dir)
     _configure_project_s2_usb_serial(micropython_dir)

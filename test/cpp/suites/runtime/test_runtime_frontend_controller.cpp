@@ -25,6 +25,15 @@ namespace {
 
 class DummyRuntimeListener : public IRuntimeListener {
  public:
+  void on_sensing_readiness_changed(const RuntimeSnapshot &snapshot) override {
+    readiness_count++;
+    last_ready = snapshot.ready_to_publish;
+    if (controller != nullptr) {
+      TEST_ASSERT_EQUAL(last_ready, controller->snapshot().ready_to_publish);
+      if (shutdown_on_readiness) controller->shutdown();
+    }
+  }
+
   void on_threshold_changed(const RuntimeSnapshot &snapshot) override {
     threshold_count++;
     last_threshold = snapshot.threshold;
@@ -49,6 +58,9 @@ class DummyRuntimeListener : public IRuntimeListener {
   }
 
   int fault_count{0};
+  int readiness_count{0};
+  bool last_ready{false};
+  bool shutdown_on_readiness{false};
   int threshold_count{0};
   int telemetry_count{0};
   float last_threshold{0.0f};
@@ -71,6 +83,34 @@ void setUp(void) {
 }
 
 void tearDown(void) {}
+
+void test_controller_notifies_readiness_edges_once_and_defers_callback_shutdown(void) {
+  RuntimeFrontendController controller;
+  DummyRuntimeListener listener;
+  listener.controller = &controller;
+  TEST_ASSERT_TRUE(controller.setup(&listener));
+  controller.loop();
+  TEST_ASSERT_EQUAL(0, listener.readiness_count);
+
+  for (bool ready : {true, false, true}) {
+    // A snapshot-bearing callback can update the cache before loop returns.
+    frontend_runtime_shim::state.snapshot.ready_to_publish = ready;
+    frontend_runtime_shim::state.emit_threshold_on_next_loop = true;
+    const int previous = listener.readiness_count;
+    controller.loop();
+    TEST_ASSERT_EQUAL(previous + 1, listener.readiness_count);
+    TEST_ASSERT_EQUAL(ready, listener.last_ready);
+    controller.loop();
+    TEST_ASSERT_EQUAL(previous + 1, listener.readiness_count);
+  }
+
+  listener.shutdown_on_readiness = true;
+  frontend_runtime_shim::state.snapshot.ready_to_publish = false;
+  frontend_runtime_shim::state.emit_threshold_on_next_loop = true;
+  controller.loop();
+  TEST_ASSERT_TRUE(frontend_runtime_shim::state.shutdown_called);
+  TEST_ASSERT_FALSE(controller.is_setup_complete());
+}
 
 void test_frontend_bootstrap_loads_defaults_and_preserves_runtime_identity(void) {
   FrontendDeviceConfigDefaults defaults;
@@ -550,6 +590,7 @@ void test_runtime_frontend_controller_switches_detector_and_resets_threshold(voi
 
 int process(void) {
   UNITY_BEGIN();
+  RUN_TEST(test_controller_notifies_readiness_edges_once_and_defers_callback_shutdown);
   RUN_TEST(test_frontend_bootstrap_loads_defaults_and_preserves_runtime_identity);
   RUN_TEST(test_frontend_bootstrap_accepts_optional_defaults_and_validates_wifi_options);
   RUN_TEST(test_frontend_bootstrap_sets_up_wifi_and_propagates_start_failure);

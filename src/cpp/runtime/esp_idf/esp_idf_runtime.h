@@ -39,6 +39,7 @@ class EspIdfRuntime : public EspIdfRuntimeBase {
 
   /** Configuration actually applied after persisted overrides are loaded. */
   const RuntimeConfig &effective_config() const { return config_; }
+  RuntimeSnapshot get_snapshot() const override;
   RuntimeDiagnosticsSnapshot get_diagnostics() const override;
   const RuntimeDiagnosticsSample *get_diagnostics_sample() const override;
 

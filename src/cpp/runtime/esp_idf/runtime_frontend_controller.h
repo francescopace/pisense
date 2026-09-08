@@ -261,6 +261,7 @@ class RuntimeFrontendController : private IRuntimeListener {
   std::unique_ptr<IEspectreRuntime> runtime_;
   IRuntimeListener *listener_{nullptr};
   bool setup_complete_{false};
+  bool last_sensing_ready_{false};
   bool services_armed_{true};
   bool live_telemetry_enabled_{true};
   uint8_t callback_depth_{0U};

@@ -1454,3 +1454,113 @@ def test_verify_installation_raises_when_required_checks_fail(monkeypatch) -> No
 
     with pytest.raises(SystemExit):
         micro.verify_installation(_make_verify_args())
+
+
+@pytest.mark.parametrize('he', [False, True])
+def test_csi_quality_patch_filters_hardware_errors_and_cleans_only_guards(tmp_path, he):
+    """Compile the patched callback to test admission, not generated source text."""
+    path = tmp_path / 'ports' / 'esp32' / 'network_wlan_csi.c'
+    path.parent.mkdir(parents=True)
+    (path.parent / 'network_wlan_csi.h').write_text(
+        'MP_DECLARE_CONST_FUN_OBJ_1(network_wlan_csi_callbacks_obj);\n')
+    (path.parent / 'network_wlan.c').write_text(
+        '    { MP_ROM_QSTR(MP_QSTR_csi_callbacks), MP_ROM_PTR(&network_wlan_csi_callbacks_obj) },\n')
+    path.write_text(r'''
+#include <stdint.h>
+#include <stdbool.h>
+#include <string.h>
+#include <assert.h>
+typedef struct {
+    uint8_t rx_state;
+#if CONFIG_SOC_WIFI_HE_SUPPORT
+    uint8_t rxend_state, rx_channel_estimate_info_vld;
+#endif
+} rx_ctrl_t;
+typedef struct {
+    rx_ctrl_t rx_ctrl;
+    uint16_t len;
+    int8_t *buf;
+    bool first_word_invalid;
+} wifi_csi_info_t;
+typedef struct {
+    volatile uint32_t callbacks;
+} csi_state_t;
+static csi_state_t native_state;
+typedef uint32_t mp_obj_t;
+#define MP_DECLARE_CONST_FUN_OBJ_1(name) extern mp_obj_t (*name)(mp_obj_t)
+#define MP_DEFINE_CONST_FUN_OBJ_1(name, function) mp_obj_t (*name)(mp_obj_t) = function
+#include "network_wlan_csi.h"
+static mp_obj_t network_wlan_csi_callbacks(mp_obj_t self_in) {
+    (void)self_in;
+    return __atomic_load_n(&native_state.callbacks, __ATOMIC_RELAXED);
+}
+MP_DEFINE_CONST_FUN_OBJ_1(network_wlan_csi_callbacks_obj, network_wlan_csi_callbacks);
+#define MP_ROM_QSTR(value) #value
+#define MP_ROM_PTR(value) value
+static const struct { const char *name; mp_obj_t (**getter)(mp_obj_t); } methods[] = {
+#include "network_wlan.c"
+};
+static void reset_counters(void) {
+    csi_state_t *state = &native_state;
+    state->callbacks = 0;
+}
+static struct { uint16_t len; int8_t data[256]; } frame;
+static unsigned accepted;
+static void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info) {
+    (void)ctx;
+    if (info == NULL) return;
+    csi_state_t *state = &native_state;
+    __atomic_fetch_add(&state->callbacks, 1, __ATOMIC_RELAXED);
+    frame.len = info->len;
+    memcpy(frame.data, info->buf, frame.len);
+    ++accepted;
+}
+int main(void) {
+    int8_t payload[256]; memset(payload, 7, sizeof(payload));
+    wifi_csi_info_t info = {.buf=payload, .len=128};
+#if CONFIG_SOC_WIFI_HE_SUPPORT
+    info.rx_ctrl.rx_channel_estimate_info_vld = 1;
+#endif
+    wifi_csi_rx_cb(NULL, &info); assert(accepted == 1);
+    info.rx_ctrl.rx_state=1;
+    wifi_csi_rx_cb(NULL, &info); assert(accepted == 1);
+    info.rx_ctrl.rx_state=0;
+#if CONFIG_SOC_WIFI_HE_SUPPORT
+    info.rx_ctrl.rxend_state=1;
+    wifi_csi_rx_cb(NULL, &info); assert(accepted == 1);
+    info.rx_ctrl.rxend_state=0; info.rx_ctrl.rx_channel_estimate_info_vld=0;
+    wifi_csi_rx_cb(NULL, &info); assert(accepted == 1);
+    info.rx_ctrl.rx_channel_estimate_info_vld=1;
+#endif
+    info.first_word_invalid=true;
+    wifi_csi_rx_cb(NULL, &info); assert(accepted == 1);
+    const uint8_t guards[] = {2,3,61,62,63};
+    for (unsigned i=0;i<sizeof(guards);++i) payload[guards[i]*2]=payload[guards[i]*2+1]=0;
+    wifi_csi_rx_cb(NULL, &info); assert(accepted == 2);
+    for (unsigned i=0;i<4;++i) assert(frame.data[i] == 0 && payload[i] == 7);
+    assert(memcmp(frame.data+4,payload+4,124) == 0);
+    info.len=256;
+    wifi_csi_rx_cb(NULL, &info); assert(accepted == 3);
+    info.len=114;
+    wifi_csi_rx_cb(NULL, &info); assert(accepted == 3);
+    wifi_csi_rx_cb(NULL, NULL); assert(accepted == 3);
+    assert(sizeof(methods) / sizeof(methods[0]) == 2);
+    assert(strcmp(methods[1].name, "MP_QSTR_csi_filtered") == 0);
+    assert((*methods[0].getter)(0) == (CONFIG_SOC_WIFI_HE_SUPPORT ? 8 : 6));
+    assert((*methods[1].getter)(0) == (CONFIG_SOC_WIFI_HE_SUPPORT ? 5 : 3));
+    reset_counters();
+    assert((*methods[0].getter)(0) == 0);
+    assert((*methods[1].getter)(0) == 0);
+    return 0;
+}
+''')
+    micro_firmware._configure_project_csi_quality(tmp_path)
+    paths = [path, path.parent / 'network_wlan_csi.h', path.parent / 'network_wlan.c']
+    patched = [source.read_bytes() for source in paths]
+    micro_firmware._configure_project_csi_quality(tmp_path)
+    assert [source.read_bytes() for source in paths] == patched
+    binary = tmp_path / 'quality-test'
+    subprocess.run(['cc', '-std=c11', '-Wall', '-Werror',
+                    f'-DCONFIG_SOC_WIFI_HE_SUPPORT={int(he)}', str(path), '-o', str(binary)],
+                   check=True, capture_output=True, text=True)
+    subprocess.run([str(binary)], check=True, capture_output=True, text=True)

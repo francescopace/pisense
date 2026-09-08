@@ -146,6 +146,7 @@ PHY_MODE_CODES = {
 }
 LTF_TYPE_CODES = {
     0: "unknown",
+    1: "lltf",
     2: "ht-ltf",
     3: "vht-ltf",
     4: "he-ltf",

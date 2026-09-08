@@ -41,6 +41,8 @@ Lightweight adapts its threshold to the observed room during startup. It may low
 
 Both profiles use a `0.0-1.0` probability threshold. Where a frontend advertises writable threshold control, an operator can override it for the current session. A Lightweight override suspends automatic threshold lowering until recalibration or explicit adaptive-threshold application. Operator changes are discarded at boot: Lightweight calibrates again, while High Accuracy restores its trained default.
 
+Inspect the capture-quality counters in logs or [API.md](API.md#diagnostics) when raw packet rate looks healthy but sensing is unstable or unavailable. Hardware-invalid estimates are rejected before both sensing and collection. In particular, a C5/C6 driver can deliver ACK CSI callbacks with a cleared estimate-valid flag: filtering them prevents corrupted input but cannot make that driver produce usable ACK estimates. Compare valid occupancy with another explicitly selected generator; do not lower thresholds to compensate for invalid or missing CSI.
+
 Rules of thumb:
 
 - too many false positives: raise the threshold
@@ -130,7 +132,7 @@ If occupancy remains below 70%:
 
 The runtime never changes the target automatically because doing so would change feature timing.
 
-The C++ sensing frontends support internal `ping`, `dns`, `dns_tcp`, and `wifi_raw`. Ping sends ICMP echo requests, `dns` sends connectionless UDP/53 queries, and `dns_tcp` uses a persistent, non-blocking TCP connection to gateway port `53`. `wifi_raw` sends Null Data directly to the AP and selects LLTF20 for ACK capture; [SETUP.md](SETUP.md) describes its runtime transitions and compatibility limits. The published product configurations use ping. Select the mode that remains stable with the deployed device, driver, AP, and gateway resolver; the runtime does not fall back automatically.
+The C++ sensing frontends support internal `ping`, `dns`, `dns_tcp`, and experimental `wifi_raw`. Ping sends ICMP echo requests, `dns` sends connectionless UDP/53 queries, and `dns_tcp` uses a persistent, non-blocking TCP connection to gateway port `53`. `wifi_raw` sends Null Data directly to the AP and selects LLTF20 for ACK capture. It may improve sampling regularity on some deployments, but usable ACK CSI depends on the device and driver; [SETUP.md](SETUP.md#traffic-generation) owns the validation matrix, runtime transitions, and compatibility limits. The published product configurations use ping. Evaluate valid temporal occupancy, capture-quality counters, and detector readiness when comparing generators; raw packet rate alone is insufficient. Select the mode that remains stable with the deployed device, driver, AP, and gateway resolver; the runtime does not fall back automatically.
 
 Rules of thumb:
 

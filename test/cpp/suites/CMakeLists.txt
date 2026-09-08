@@ -73,6 +73,16 @@ add_espectre_test(test_runtime_helpers
     LIBRARIES espectre_runtime_testlib
 )
 
+# Exercise the HE metadata branch in the same capture admission test owner.
+add_espectre_test(test_runtime_helpers_he
+    "${CMAKE_CURRENT_SOURCE_DIR}/runtime/test_runtime_helpers.cpp"
+    LIBRARIES espectre_runtime_testlib
+)
+target_sources(test_runtime_helpers_he PRIVATE
+    "${ESPECTRE_CPP_ROOT}/runtime/esp_idf/csi_capture_service.cpp"
+)
+target_compile_definitions(test_runtime_helpers_he PRIVATE CONFIG_SOC_WIFI_HE_SUPPORT=1)
+
 add_espectre_test(test_frontend_sysinfo_helpers
     "${CMAKE_CURRENT_SOURCE_DIR}/runtime/test_frontend_sysinfo_helpers.cpp"
     LIBRARIES espectre_runtime_testlib

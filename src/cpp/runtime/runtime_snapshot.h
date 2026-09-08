@@ -53,6 +53,19 @@ struct RuntimeDiagnosticsSnapshot {
   uint64_t csi_admitted_total{0U};
   /** CSI packets rejected by capture-level validation. */
   uint64_t csi_filtered_total{0U};
+  /** Packets rejected because the receiver reported an error. */
+  uint64_t csi_rx_error_total{0U};
+  /** Packets rejected because reception ended with an error (HE-capable chips). */
+  uint64_t csi_rx_end_error_total{0U};
+  /** Packets rejected because the hardware CSI estimate was invalid (HE-capable chips). */
+  uint64_t csi_invalid_estimate_total{0U};
+  /** Packets rejected because hardware-invalid source pairs affect live or unknown tones. */
+  uint64_t csi_invalid_first_word_total{0U};
+  /** Frames whose hardware-invalid guard pairs were zeroed without changing live tones. */
+  uint64_t csi_sanitized_first_word_total{0U};
+  /** Valid estimates whose hardware length differs from the original CSI buffer length. */
+  uint64_t csi_estimate_length_mismatch_total{0U};
+
   /** Valid CSI callbacks dropped because the callback-to-runtime queue was full. */
   uint64_t csi_pending_frame_drops_total{0U};
   /** Empty temporal detector slots observed before admitted packets. */

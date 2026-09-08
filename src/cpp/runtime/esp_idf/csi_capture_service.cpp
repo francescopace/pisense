@@ -45,6 +45,13 @@ void CsiCaptureService::reset_session() {
   unknown_layout_packets_.store(0U, std::memory_order_relaxed);
   bad_length_packets_.store(0U, std::memory_order_relaxed);
   missing_metadata_packets_.store(0U, std::memory_order_relaxed);
+  rx_error_packets_.store(0U, std::memory_order_relaxed);
+  rx_end_error_packets_.store(0U, std::memory_order_relaxed);
+  invalid_estimate_packets_.store(0U, std::memory_order_relaxed);
+  invalid_first_word_packets_.store(0U, std::memory_order_relaxed);
+  sanitized_first_word_packets_.store(0U, std::memory_order_relaxed);
+  estimate_length_mismatch_packets_.store(0U, std::memory_order_relaxed);
+
   normalization_collapse_packets_.store(0U, std::memory_order_relaxed);
   normalization_remap_packets_.store(0U, std::memory_order_relaxed);
   enable_attempts_.store(0U, std::memory_order_relaxed);
@@ -202,7 +209,15 @@ bool CsiCaptureService::accept_rx_timestamp_(const wifi_csi_info_t *data) {
 
 void CsiCaptureService::record_format_drop_(CsiFormatReasonCode reason_code) {
   filtered_packets_.fetch_add(1U, std::memory_order_relaxed);
-  consecutive_format_drops_++;
+  // Quality failures may belong to unrelated background traffic. Only format
+  // failures participate in the existing format-change reset heuristic; gaps
+  // in the selected valid stream are handled by the temporal sampler.
+  if (reason_code != CsiFormatReasonCode::RX_ERROR &&
+      reason_code != CsiFormatReasonCode::RX_END_ERROR &&
+      reason_code != CsiFormatReasonCode::INVALID_ESTIMATE &&
+      reason_code != CsiFormatReasonCode::INVALID_FIRST_WORD) {
+    consecutive_format_drops_++;
+  }
   switch (reason_code) {
     case CsiFormatReasonCode::NULL_OR_EMPTY:
       // Already counted in null_or_empty_packets_ at the call site; do not
@@ -228,6 +243,18 @@ void CsiCaptureService::record_format_drop_(CsiFormatReasonCode reason_code) {
     case CsiFormatReasonCode::MISSING_METADATA:
       missing_metadata_packets_.fetch_add(1U, std::memory_order_relaxed);
       break;
+    case CsiFormatReasonCode::RX_ERROR:
+      rx_error_packets_.fetch_add(1U, std::memory_order_relaxed);
+      break;
+    case CsiFormatReasonCode::RX_END_ERROR:
+      rx_end_error_packets_.fetch_add(1U, std::memory_order_relaxed);
+      break;
+    case CsiFormatReasonCode::INVALID_ESTIMATE:
+      invalid_estimate_packets_.fetch_add(1U, std::memory_order_relaxed);
+      break;
+    case CsiFormatReasonCode::INVALID_FIRST_WORD:
+      invalid_first_word_packets_.fetch_add(1U, std::memory_order_relaxed);
+      break;
     case CsiFormatReasonCode::NONE:
     default:
       break;
@@ -235,20 +262,24 @@ void CsiCaptureService::record_format_drop_(CsiFormatReasonCode reason_code) {
 }
 
 void CsiCaptureService::process_packet(wifi_csi_info_t *data) {
-  if (data == nullptr || data->buf == nullptr || data->len == 0U) {
-    null_or_empty_packets_.fetch_add(1U, std::memory_order_relaxed);
-    last_assessment_ = assess_ht20_sensing_format(data, capture_profile_);
-    record_format_drop_(last_assessment_.reason_code);
-    return;
-  }
-
   CsiFormatAssessment assessment = assess_ht20_sensing_format(data, capture_profile_);
   if (!assessment.is_sensing_accepted()) {
+    if (assessment.reason_code == CsiFormatReasonCode::NULL_OR_EMPTY) {
+      null_or_empty_packets_.fetch_add(1U, std::memory_order_relaxed);
+    }
     last_assessment_ = assessment;
     record_format_drop_(assessment.reason_code);
     return;
   }
 
+#if CONFIG_SOC_WIFI_HE_SUPPORT
+  // This metadata describes the original estimate, not the normalized payload.
+  // A mismatch is diagnostic until the driver defines its relation for every
+  // supported LTF layout; it must not reject an otherwise valid estimate.
+  if (data->rx_ctrl.rx_channel_estimate_len != data->len) {
+    estimate_length_mismatch_packets_.fetch_add(1U, std::memory_order_relaxed);
+  }
+#endif
   // Match the MicroPython runtime: the tag-change reset applies only once a
   // packet has been accepted, so the very first packet never forces a reset.
   const bool should_reset_detector =
@@ -262,6 +293,18 @@ void CsiCaptureService::process_packet(wifi_csi_info_t *data) {
     normalized = normalize_ht20_csi_payload(data->buf, data->len, remap_scratch_.data(), remap_scratch_.size());
   } else {
     normalized = {data->buf, HT20_CSI_LEN, NormalizedCSIPayloadTag::NONE};
+  }
+
+  if (data->first_word_invalid && normalized.valid()) {
+    // Never mutate the Wi-Fi driver's buffer. The invalid bytes have already
+    // been proven to be centered guard pairs, independent of their values.
+    if (normalized.data != remap_scratch_.data()) {
+      std::copy_n(normalized.data, HT20_CSI_LEN, remap_scratch_.data());
+    }
+    std::fill_n(remap_scratch_.data(), 4U, int8_t{0});
+    normalized.data = remap_scratch_.data();
+    bin_layout_ = Ht20BinLayout::CENTERED;
+    sanitized_first_word_packets_.fetch_add(1U, std::memory_order_relaxed);
   }
 
   // Bin ordering is independent of payload length: classic MACs deliver

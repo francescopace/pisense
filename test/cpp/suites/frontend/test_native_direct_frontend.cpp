@@ -269,8 +269,51 @@ void test_native_frontend_direct_updates_bssid_and_mqtt_without_returning_secret
   TEST_ASSERT_EQUAL(1, mqtt_transport_mock::state.setup_calls);
 }
 
+void test_native_frontend_does_not_publish_motion_without_ready_csi(void) {
+  frontend_runtime_shim::state.snapshot = make_ready_snapshot();
+  frontend_runtime_shim::state.snapshot.ready_to_publish = false;
+  MockMqttTransport mqtt;
+  MockDirectHttpService direct;
+  NativeFrontend frontend(&mqtt, nullptr, &direct);
+  EspectreDeviceConfig config;
+  config.mqtt_scheme = "mqtt";
+  config.mqtt_host = "localhost";
+  config.mqtt_port = 1883U;
+  frontend.set_device_config(config);
+  NativeFrontend::WifiProvisioningInfo wifi;
+  wifi.ssid = "Lab";
+  frontend.set_wifi_provisioning_info(wifi);
+  EspectreDeviceInfo info;
+  info.network.ip_address = "192.168.1.42";
+  frontend.set_device_info(info);
+  TEST_ASSERT_TRUE(frontend.setup());
+  mqtt.emit_connection(true);
+  direct.emit_client_count(1U);
+  mqtt_transport_mock::state.publishes.clear();
+  direct_http_service_mock::state.published_events.clear();
+  frontend.on_threshold_changed(frontend_runtime_shim::state.snapshot);
+  frontend.on_live_telemetry(0.0f, 0.5f);
+  frontend.on_motion_state_changed(frontend_runtime_shim::state.snapshot);
+  frontend.loop();
+  for (const auto &event : direct_http_service_mock::state.published_events) {
+    TEST_ASSERT_TRUE(event.event_name != "motion");
+  }
+  for (const auto &publish : mqtt_transport_mock::state.publishes) {
+    TEST_ASSERT_TRUE(publish.topic.find("/motion") == std::string::npos);
+  }
+  const auto sensing = direct.emit_request(
+      DirectRequest{"", "sensing", "{}", "/espectre/v1/sensing", "GET"});
+  TEST_ASSERT_TRUE(sensing.find("\"ready\":false") != std::string::npos);
+}
+
 void test_native_frontend_direct_exposes_portal_reads_without_secrets(void) {
   frontend_runtime_shim::state.snapshot = make_ready_snapshot();
+  frontend_runtime_shim::state.diagnostics.csi_rx_error_total = 1U;
+  frontend_runtime_shim::state.diagnostics.csi_rx_end_error_total = 2U;
+  frontend_runtime_shim::state.diagnostics.csi_invalid_estimate_total = 3U;
+  frontend_runtime_shim::state.diagnostics.csi_invalid_first_word_total = 4U;
+  frontend_runtime_shim::state.diagnostics.csi_sanitized_first_word_total = 5U;
+  frontend_runtime_shim::state.diagnostics.csi_estimate_length_mismatch_total = 6U;
   frontend_runtime_shim::state.diagnostics.minimum_free_memory_bytes = 2048U;
   frontend_runtime_shim::state.diagnostics.largest_free_memory_block_bytes = 1024U;
   frontend_runtime_shim::state.diagnostics.cpu_frequency_mhz = 160U;
@@ -371,6 +414,20 @@ void test_native_frontend_direct_exposes_portal_reads_without_secrets(void) {
   const std::string diagnostics =
       direct.emit_request(DirectRequest{"", "read_diagnostics", "{}",
                                         "/espectre/v1/diagnostics", "GET"});
+  mqtt.emit_command("{\"command_id\":\"quality\",\"command\":\"read_diagnostics\"}");
+  const std::string mqtt_diagnostics = mqtt_transport_mock::state.publishes.back().payload;
+  TEST_ASSERT_TRUE(diagnostics.find("\"csi_rx_error_total\":1") != std::string::npos);
+  TEST_ASSERT_TRUE(mqtt_diagnostics.find("\"csi_rx_error_total\":1") != std::string::npos);
+  TEST_ASSERT_TRUE(diagnostics.find("\"csi_rx_end_error_total\":2") != std::string::npos);
+  TEST_ASSERT_TRUE(mqtt_diagnostics.find("\"csi_rx_end_error_total\":2") != std::string::npos);
+  TEST_ASSERT_TRUE(diagnostics.find("\"csi_invalid_estimate_total\":3") != std::string::npos);
+  TEST_ASSERT_TRUE(mqtt_diagnostics.find("\"csi_invalid_estimate_total\":3") != std::string::npos);
+  TEST_ASSERT_TRUE(diagnostics.find("\"csi_invalid_first_word_total\":4") != std::string::npos);
+  TEST_ASSERT_TRUE(mqtt_diagnostics.find("\"csi_invalid_first_word_total\":4") != std::string::npos);
+  TEST_ASSERT_TRUE(diagnostics.find("\"csi_sanitized_first_word_total\":5") != std::string::npos);
+  TEST_ASSERT_TRUE(mqtt_diagnostics.find("\"csi_sanitized_first_word_total\":5") != std::string::npos);
+  TEST_ASSERT_TRUE(diagnostics.find("\"csi_estimate_length_mismatch_total\":6") != std::string::npos);
+  TEST_ASSERT_TRUE(mqtt_diagnostics.find("\"csi_estimate_length_mismatch_total\":6") != std::string::npos);
   TEST_ASSERT_TRUE(diagnostics.find("\"mqtt\":{") != std::string::npos);
   TEST_ASSERT_TRUE(diagnostics.find("broker.local") == std::string::npos);
   TEST_ASSERT_TRUE(diagnostics.find("\"scheme\"") == std::string::npos);
@@ -602,6 +659,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_native_frontend_peer_discovery_is_capability_gated_correlated_and_bounded);
   RUN_TEST(test_native_frontend_peer_discovery_drops_completion_after_wifi_loss_and_shutdown);
   RUN_TEST(test_native_frontend_direct_updates_bssid_and_mqtt_without_returning_secrets);
+  RUN_TEST(test_native_frontend_does_not_publish_motion_without_ready_csi);
   RUN_TEST(test_native_frontend_direct_exposes_portal_reads_without_secrets);
   RUN_TEST(test_native_frontend_keeps_direct_available_for_a_legacy_mqtt_endpoint);
   RUN_TEST(test_native_frontend_direct_set_sensing_is_correlated);

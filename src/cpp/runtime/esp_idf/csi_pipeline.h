@@ -210,6 +210,12 @@ class CsiPipeline {
    * Check if CSI is currently enabled
    */
   bool is_enabled() const { return enabled_; }
+  /** Whether an admitted detector input was processed within the current window. */
+  bool has_current_detector_input(int64_t now_us) const {
+    return enabled_ && has_detector_input_ && now_us >= last_detector_input_us_ &&
+           static_cast<uint64_t>(now_us - last_detector_input_us_) <
+               static_cast<uint64_t>(sampler_.window_size_ms()) * 1000U;
+  }
   uint64_t accepted_packets_total() const {
     return accepted_packets_total_.load(std::memory_order_relaxed);
   }
@@ -240,6 +246,24 @@ class CsiPipeline {
   }
   uint64_t capture_filtered_packets_total() const {
     return capture_service_.filtered_packets();
+  }
+  uint64_t capture_rx_error_total() const {
+    return capture_service_.rx_error_packets();
+  }
+  uint64_t capture_rx_end_error_total() const {
+    return capture_service_.rx_end_error_packets();
+  }
+  uint64_t capture_invalid_estimate_total() const {
+    return capture_service_.invalid_estimate_packets();
+  }
+  uint64_t capture_invalid_first_word_total() const {
+    return capture_service_.invalid_first_word_packets();
+  }
+  uint64_t capture_sanitized_first_word_total() const {
+    return capture_service_.sanitized_first_word_packets();
+  }
+  uint64_t capture_estimate_length_mismatch_total() const {
+    return capture_service_.estimate_length_mismatch_packets();
   }
   uint64_t pending_frame_drops_total() const {
     return pending_frame_drops_.load(std::memory_order_relaxed);
@@ -328,6 +352,8 @@ class CsiPipeline {
   live_telemetry_callback_t live_telemetry_callback_;
   channel_change_callback_t channel_change_callback_;
   uint32_t last_heartbeat_ms_{0U};
+  int64_t last_detector_input_us_{0};
+  bool has_detector_input_{false};
   // Evaluation advances on elapsed packet time, not on packet count, so a
   // window keeps its deploy-time meaning when the stream runs off-nominal.
   EvaluationCadence cadence_{};

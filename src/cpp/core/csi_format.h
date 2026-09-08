@@ -54,9 +54,11 @@ enum class Ht20BinLayout : uint8_t {
     CLASSIC,   // bin = subcarrier mod 64, DC at bin 0
 };
 
-inline uint8_t ht20_bins_with_energy(const int8_t* csi_data, const uint8_t* bins, uint8_t count) {
+inline uint8_t ht20_bins_with_energy(const int8_t* csi_data, const uint8_t* bins, uint8_t count,
+                                         bool first_word_invalid = false) {
     uint8_t populated = 0;
     for (uint8_t i = 0; i < count; ++i) {
+        if (first_word_invalid && bins[i] < 2U) continue;
         const uint16_t byte_index = static_cast<uint16_t>(bins[i]) * 2U;
         if (csi_data[byte_index] != 0 || csi_data[byte_index + 1] != 0) {
             populated++;
@@ -74,9 +76,11 @@ inline uint8_t ht20_bins_with_energy(const int8_t* csi_data, const uint8_t* bins
  *
  * @param csi_data Raw CSI payload (interleaved I/Q pairs)
  * @param csi_len Payload length in bytes (must be HT20_CSI_LEN)
+ * @param first_word_invalid Ignore the two hardware-invalid source pairs
  * @return The detected layout, or UNKNOWN when the evidence is inconclusive
  */
-inline Ht20BinLayout detect_ht20_bin_layout(const int8_t* csi_data, size_t csi_len) {
+inline Ht20BinLayout detect_ht20_bin_layout(const int8_t* csi_data, size_t csi_len,
+                                            bool first_word_invalid = false) {
     if (csi_data == nullptr || csi_len != HT20_CSI_LEN) {
         return Ht20BinLayout::UNKNOWN;
     }
@@ -86,9 +90,9 @@ inline Ht20BinLayout detect_ht20_bin_layout(const int8_t* csi_data, size_t csi_l
     const uint8_t classic_energy =
         ht20_bins_with_energy(csi_data, HT20_CLASSIC_ONLY_NULL_BINS, kNullBinCount);
     const uint8_t centered_energy =
-        ht20_bins_with_energy(csi_data, HT20_CENTERED_ONLY_NULL_BINS, kNullBinCount);
+        ht20_bins_with_energy(csi_data, HT20_CENTERED_ONLY_NULL_BINS, kNullBinCount, first_word_invalid);
 
-    if (classic_energy == 0U && centered_energy == kNullBinCount) {
+    if (classic_energy == 0U && centered_energy == kNullBinCount - (first_word_invalid ? 1U : 0U)) {
         return Ht20BinLayout::CLASSIC;
     }
     if (centered_energy == 0U && classic_energy == kNullBinCount) {

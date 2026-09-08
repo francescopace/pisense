@@ -697,7 +697,8 @@ void EspIdfDirectHttpService::raw_worker_entry_(void *context) {
 #if defined(ESP_PLATFORM)
   auto *service = static_cast<EspIdfDirectHttpService *>(context);
   while (service != nullptr && service->raw_worker_running_.load(std::memory_order_acquire)) {
-    (void) ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    // Poll an idle stream too: all CSI may be rejected by hardware validation.
+    (void) ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100U));
     while (service->raw_worker_running_.load(std::memory_order_acquire) &&
            service->service_raw_stream_()) {
     }
@@ -1284,7 +1285,16 @@ bool EspIdfDirectHttpService::service_raw_stream_() {
     records += 1U;
   }
   if (records == 0U) {
+    // Do not manufacture CSI or an empty chunk (which ends the HTTP body).
+    // Peeking is non-blocking and leaves any client bytes untouched.
+    char byte = 0;
+    const int received = recv(httpd_req_to_sockfd(request), &byte, sizeof(byte),
+                              MSG_PEEK | MSG_DONTWAIT);
+    const int receive_error = errno;
+    const bool disconnected = received == 0 ||
+        (received < 0 && (receive_error == ECONNRESET || receive_error == ENOTCONN));
     xSemaphoreGive(raw_send_mutex_);
+    if (disconnected) (void) stop_raw_session(RawCsiStopReason::RAW_DISCONNECTED);
     return false;
   }
 

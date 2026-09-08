@@ -64,6 +64,7 @@ class NativeFrontend : public IRuntimeListener {
 
  protected:
   void on_motion_state_changed(const RuntimeSnapshot &snapshot) override;
+  void on_sensing_readiness_changed(const RuntimeSnapshot &snapshot) override;
   void on_periodic_update(const RuntimeSnapshot &snapshot, uint32_t packets_received) override;
   void on_threshold_changed(const RuntimeSnapshot &snapshot) override;
   void on_detector_changed(const RuntimeSnapshot &snapshot) override;

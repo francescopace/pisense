@@ -116,6 +116,7 @@ void NativeMqttFrontend::publish_status(bool online) {
 }
 
 void NativeMqttFrontend::publish_telemetry(const RuntimeSnapshot &snapshot, uint32_t now_ms) {
+  if (!snapshot.ready_to_publish || snapshot.calibrating) return;
   const char *frontend = owner_.device_info_.frontend.empty() ? "native" : owner_.device_info_.frontend.c_str();
   (void)publish_frontend_mqtt_message(
       transport_, owner_.device_config_, "motion",

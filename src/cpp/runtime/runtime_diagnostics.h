@@ -108,6 +108,10 @@ class RuntimeDiagnosticsSampler {
   bool baseline_ready_{false};
 };
 
+/** Append capture-quality counters to an already opened JSON object. */
+void append_runtime_csi_quality_diagnostics_json(std::string *out,
+                                                const RuntimeDiagnosticsSnapshot &diagnostics);
+
 /**
  * Append shared platform and performance fields to an existing JSON object.
  *

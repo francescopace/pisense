@@ -209,6 +209,27 @@ void test_matter_frontend_threshold_and_calibration_callbacks_update_runtime_sna
   TEST_ASSERT_FALSE(frontend.snapshot().calibrating);
 }
 
+void test_matter_frontend_publishes_sensing_on_both_readiness_edges(void) {
+  MockMatterBindings bindings;
+  MockDirectHttpService direct;
+  MatterFrontend frontend(&bindings, 8, &direct);
+  TEST_ASSERT_TRUE(frontend.setup());
+  direct.emit_client_count(1U);
+
+  for (bool ready : {true, false}) {
+    RuntimeSnapshot snapshot = make_ready_snapshot(false);
+    snapshot.ready_to_publish = ready;
+    frontend_runtime_shim::state.last_listener->on_motion_state_changed(snapshot);
+    direct_http_service_mock::state.published_events.clear();
+    frontend.on_sensing_readiness_changed(snapshot);
+    TEST_ASSERT_EQUAL(1, direct_http_service_mock::state.published_events.size());
+    const auto &event = direct_http_service_mock::state.published_events[0];
+    TEST_ASSERT_EQUAL_STRING("sensing", event.event_name.c_str());
+    TEST_ASSERT_TRUE(event.data_json.find(ready ? "\"ready\":true" : "\"ready\":false") !=
+                     std::string::npos);
+  }
+}
+
 void test_matter_frontend_runtime_fault_is_reported(void) {
   MockMatterBindings bindings;
   MockDirectHttpService direct;
@@ -446,6 +467,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_matter_frontend_defers_live_telemetry_serialization_until_after_runtime_loop);
   RUN_TEST(test_matter_frontend_threshold_and_calibration_callbacks_update_runtime_snapshot);
   RUN_TEST(test_matter_frontend_runtime_fault_is_reported);
+  RUN_TEST(test_matter_frontend_publishes_sensing_on_both_readiness_edges);
   RUN_TEST(test_matter_frontend_exposes_runtime_tuning_over_direct_http);
   RUN_TEST(test_matter_frontend_raw_session_uses_shared_controller_and_recovers);
   RUN_TEST(test_matter_direct_exposes_common_wifi_and_node_label_capabilities);

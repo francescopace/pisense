@@ -200,6 +200,19 @@ def test_parse_packet_accepts_transport_neutral_v8_header():
     np.testing.assert_allclose(packet.iq_complex, np.array([20 + 10j, 40 - 30j], dtype=np.complex64))
 
 
+def test_parse_packet_preserves_legacy_lltf_metadata_and_iq():
+    payload = [10, -20] * 64
+    packet = CSIReceiver(bind_host='127.0.0.1')._parse_packet(
+        build_packet(phy_mode=1, ltf_type=1, payload=payload)
+    )
+
+    assert packet is not None
+    assert packet.record_version == RAW_CSI_RECORD_VERSION
+    assert packet.phy_mode == 'legacy'
+    assert packet.ltf_type == 'lltf'
+    assert packet.iq_raw.tolist() == payload
+
+
 def test_parse_csi_record_reads_historical_v7_offline():
     record = build_packet(version=RAW_CSI_RECORD_VERSION_V7, seq_num=17)
 

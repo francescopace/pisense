@@ -167,6 +167,10 @@ typedef struct {
   uint8_t dump_ack_en;
 } wifi_csi_config_t;
 
+#if CONFIG_SOC_WIFI_HE_SUPPORT
+// Expose only the selected metadata family to catch accidental ABI mixing.
+enum { RX_BB_FORMAT_11G = 0, RX_BB_FORMAT_HT = 1, RX_BB_FORMAT_VHT = 2 };
+#endif
 // RX control structure (matches ESP-IDF wifi_pkt_rx_ctrl_t)
 typedef struct {
   int8_t rssi;
@@ -188,6 +192,13 @@ typedef struct {
   uint8_t ant;
   uint16_t sig_len;
   uint8_t rx_state;
+#if CONFIG_SOC_WIFI_HE_SUPPORT
+  uint8_t cur_bb_format;
+  uint8_t second;
+  uint8_t rxend_state;
+  uint8_t rx_channel_estimate_info_vld;
+  uint16_t rx_channel_estimate_len;
+#endif
 } wifi_pkt_rx_ctrl_t;
 
 // CSI info structure (matches ESP-IDF wifi_csi_info_t)

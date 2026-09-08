@@ -23,6 +23,7 @@ static const char *TAG = "CsiPipeline";
 void CsiPipeline::init(BaseDetector* detector, IWiFiCSI* wifi_csi) {
   detector_ = detector;
   last_heartbeat_ms_ = 0U;
+  has_detector_input_ = false;
   packets_processed_.store(0U, std::memory_order_relaxed);
   capture_service_.init(wifi_csi);
   capture_service_.set_packet_callback(&CsiPipeline::capture_packet_callback_, this);
@@ -119,6 +120,7 @@ void CsiPipeline::stop_raw_capture() {
 }
 
 void CsiPipeline::clear_detector_state_() {
+  has_detector_input_ = false;
   if (detector_) {
     MotionState previous_state = effective_motion_state_;
     // Cold reset: clear turbulence history and state.
@@ -310,6 +312,8 @@ void CsiPipeline::process_admitted_candidate_() {
     return;
   }
   pending_candidate_valid_ = false;
+  last_detector_input_us_ = esp_timer_get_time();
+  has_detector_input_ = true;
   const int8_t *csi_data = pending_candidate_.csi.data();
   const size_t csi_len = pending_candidate_.len;
   const int8_t rssi_dbm = pending_candidate_.rssi_dbm;
@@ -470,6 +474,7 @@ esp_err_t CsiPipeline::enable(csi_processed_callback_t packet_callback,
   if (err == ESP_OK) {
     enabled_ = true;
     last_heartbeat_ms_ = 0U;
+    has_detector_input_ = false;
     packets_processed_.store(0U, std::memory_order_relaxed);
   }
   return err;
@@ -509,6 +514,7 @@ esp_err_t CsiPipeline::disable() {
   motion_state_event_.clear();
   packets_processed_.store(0U, std::memory_order_relaxed);
   last_heartbeat_ms_ = 0U;
+  has_detector_input_ = false;
   last_rssi_dbm_ = INT8_MIN;
   last_channel_ = 0U;
   cadence_.reset();

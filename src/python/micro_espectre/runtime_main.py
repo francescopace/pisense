@@ -695,6 +695,7 @@ def main(wlan=None):
     native_callback_total = wifi_csi_callbacks(wlan)
     diagnostics_sampler.reset(
         collect_runtime_diagnostics_snapshot(
+            wlan=wlan,
             traffic_generator=traffic_gen,
             callback_total=(
                 native_callback_total
@@ -777,6 +778,7 @@ def main(wlan=None):
                     native_callback_total = wifi_csi_callbacks(wlan)
                     diagnostics_sampler.reset(
                         collect_runtime_diagnostics_snapshot(
+                            wlan=wlan,
                             traffic_generator=traffic_gen,
                             callback_total=(
                                 native_callback_total
@@ -832,6 +834,7 @@ def main(wlan=None):
                 native_callback_total = wifi_csi_callbacks(wlan)
                 diagnostics = diagnostics_sampler.sample(
                     collect_runtime_diagnostics_snapshot(
+                        wlan=wlan,
                         traffic_generator=traffic_gen,
                         callback_total=(
                             native_callback_total

@@ -52,6 +52,7 @@ struct CapturedCsiPacket {
   bool first_word_invalid{true};
   bool missing_lltf_bins_zero{false};
   bool rotated_to_centered{false};
+  bool reset_detector{false};
 };
 
 struct CapturedChannelChange {
@@ -97,6 +98,7 @@ class CaptureWiFiMock final : public IWiFiCSI {
 void capture_csi_packet(void *context, const wifi_csi_info_t *info, const NormalizedCSIPayload &normalized) {
   auto *captured = static_cast<CapturedCsiPacket *>(context);
   captured->callback_count++;
+  captured->reset_detector = normalized.reset_detector_before_consume;
   captured->first_value = normalized.valid() ? normalized.data[0] : 0;
   captured->retained_value = normalized.valid() ? normalized.data[16] : 0;
   captured->info_len = info != nullptr ? info->len : 0U;
@@ -124,6 +126,127 @@ void capture_channel_change(void *context, uint8_t previous_channel, uint8_t cur
 
 }  // namespace
 
+void test_csi_quality_rejects_hardware_errors_and_preserves_valid_tones(void) {
+    CaptureWiFiMock wifi;
+    CsiCaptureService service;
+    CapturedCsiPacket captured;
+    service.init(&wifi);
+    service.set_packet_callback(capture_csi_packet, &captured);
+    TEST_ASSERT_EQUAL(ESP_OK, service.enable());
+    std::array<int8_t, 256> payload;
+    payload.fill(12);
+    for (uint8_t bin : HT20_CENTERED_ONLY_NULL_BINS) {
+        payload[bin * 2] = payload[bin * 2 + 1] = 0;
+    }
+    wifi_csi_info_t info{};
+    info.buf = payload.data();
+    info.len = 128;
+    info.rx_ctrl.channel = 1;
+#if CONFIG_SOC_WIFI_HE_SUPPORT
+    info.rx_ctrl.cur_bb_format = RX_BB_FORMAT_HT;
+    info.rx_ctrl.rx_channel_estimate_info_vld = 1;
+    info.rx_ctrl.rx_channel_estimate_len = 128;
+#else
+    info.rx_ctrl.sig_mode = 1;
+#endif
+    service.process_packet(&info);
+    TEST_ASSERT_EQUAL(1, captured.callback_count);
+    TEST_ASSERT_TRUE(std::equal(payload.begin(), payload.begin() + 128, captured.payload.begin()));
+    info.rx_ctrl.rx_state = 1;
+    for (unsigned i = 0; i < 9; ++i) service.process_packet(&info);
+    TEST_ASSERT_EQUAL(9, service.rx_error_packets());
+    info.len = 127;
+    for (unsigned i = 0; i < 9; ++i) service.process_packet(&info);
+    TEST_ASSERT_EQUAL(18, service.rx_error_packets());
+    info.buf = nullptr;
+    for (unsigned i = 0; i < 9; ++i) service.process_packet(&info);
+    TEST_ASSERT_EQUAL(27, service.rx_error_packets());
+    info.buf = payload.data();
+    info.len = 128;
+    info.rx_ctrl.rx_state = 0;
+#if CONFIG_SOC_WIFI_HE_SUPPORT
+    info.rx_ctrl.rxend_state = 1;
+    info.rx_ctrl.rx_channel_estimate_info_vld = 0;
+    service.process_packet(&info);
+    TEST_ASSERT_EQUAL(1, service.rx_end_error_packets());
+    TEST_ASSERT_EQUAL(0, service.invalid_estimate_packets());
+    info.rx_ctrl.rxend_state = 0;
+    info.len = 127;
+    for (unsigned i = 0; i < 9; ++i) service.process_packet(&info);
+    info.len = 0;
+    for (unsigned i = 0; i < 9; ++i) service.process_packet(&info);
+    info.len = 128;
+    service.process_packet(&info);
+    TEST_ASSERT_EQUAL(19, service.invalid_estimate_packets());
+    info.rx_ctrl.rx_channel_estimate_info_vld = 1;
+#endif
+    service.process_packet(&info);
+    TEST_ASSERT_EQUAL(2, captured.callback_count);
+    TEST_ASSERT_FALSE(captured.reset_detector);
+    info.first_word_invalid = true;
+    for (uint16_t length : {126, 127}) {
+        info.len = length;
+        for (unsigned i = 0; i < 9; ++i) service.process_packet(&info);
+    }
+    info.len = 128;
+    info.buf = nullptr;
+    for (unsigned i = 0; i < 9; ++i) service.process_packet(&info);
+    info.buf = payload.data();
+    TEST_ASSERT_EQUAL(27, service.invalid_first_word_packets());
+    TEST_ASSERT_EQUAL(2, captured.callback_count);
+    for (uint16_t length : {128, 256}) {
+        info.len = length;
+        payload[0] = payload[1] = payload[2] = payload[3] = 127;
+        service.process_packet(&info);
+        if (length == 128) TEST_ASSERT_FALSE(captured.reset_detector);
+        TEST_ASSERT_TRUE(std::equal(payload.begin() + 4, payload.begin() + 128, captured.payload.begin() + 4));
+        for (unsigned i = 0; i < 4; ++i) TEST_ASSERT_EQUAL_INT8(0, captured.payload[i]);
+        TEST_ASSERT_EQUAL_INT8(127, payload[0]);
+    }
+    TEST_ASSERT_EQUAL(4, captured.callback_count);
+    TEST_ASSERT_EQUAL(2, service.sanitized_first_word_packets());
+#if CONFIG_SOC_WIFI_HE_SUPPORT
+    TEST_ASSERT_EQUAL(1, service.estimate_length_mismatch_packets());
+#endif
+    for (uint16_t length : {114, 228}) {
+        info.len = length;
+        service.process_packet(&info);
+    }
+    TEST_ASSERT_EQUAL(4, captured.callback_count);
+    TEST_ASSERT_EQUAL(29, service.invalid_first_word_packets());
+    // No latched layout is available after a session reset. Corrupted guard
+    // bytes must not prevent a centered layout being established safely.
+    service.reset_session();
+    info.len = 128;
+    service.process_packet(&info);
+    TEST_ASSERT_EQUAL(5, captured.callback_count);
+    service.reset_session();
+    payload.fill(0);
+    service.process_packet(&info);
+    TEST_ASSERT_EQUAL(5, captured.callback_count);
+    TEST_ASSERT_EQUAL(1, service.invalid_first_word_packets());
+    payload.fill(12);
+    for (uint8_t bin : HT20_CLASSIC_ONLY_NULL_BINS) {
+        payload[bin * 2] = payload[bin * 2 + 1] = 0;
+    }
+    service.process_packet(&info);
+    TEST_ASSERT_EQUAL(5, captured.callback_count);
+    TEST_ASSERT_EQUAL(2, service.invalid_first_word_packets());
+    TEST_ASSERT_EQUAL(2, service.filtered_packets());
+    TEST_ASSERT_EQUAL(ESP_OK, service.disable());
+    TEST_ASSERT_EQUAL(ESP_OK, service.enable(CsiCaptureProfile::LLTF20));
+    info.len = 106;
+#if CONFIG_SOC_WIFI_HE_SUPPORT
+    info.rx_ctrl.cur_bb_format = RX_BB_FORMAT_11G;
+#else
+    info.rx_ctrl.sig_mode = 0;
+#endif
+    service.process_packet(&info);
+    TEST_ASSERT_EQUAL(5, captured.callback_count);
+    TEST_ASSERT_EQUAL(3, service.invalid_first_word_packets());
+}
+
+#if !CONFIG_SOC_WIFI_HE_SUPPORT
 void test_wifi_csi_real_forwards_calls_to_mocked_esp_wifi(void) {
     WiFiCSIReal wifi;
     wifi_csi_config_t config{};
@@ -754,8 +877,12 @@ void test_sta_socket_binding_uses_resolved_interface(void) {
     close(sock);
 }
 
+#endif
+
 int process(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_csi_quality_rejects_hardware_errors_and_preserves_valid_tones);
+#if !CONFIG_SOC_WIFI_HE_SUPPORT
     RUN_TEST(test_wifi_csi_real_forwards_calls_to_mocked_esp_wifi);
     RUN_TEST(test_lltf_preference_and_vht_capability_resolve_capture_profile);
     RUN_TEST(test_lltf20_profile_inherits_supported_ht20_payload_layouts);
@@ -777,6 +904,7 @@ int process(void) {
     RUN_TEST(test_mqtt_payload_assembler_rejects_invalid_fragments);
     RUN_TEST(test_sta_socket_binding_rejects_missing_or_invalid_interface);
     RUN_TEST(test_sta_socket_binding_uses_resolved_interface);
+#endif
     return UNITY_END();
 }
 

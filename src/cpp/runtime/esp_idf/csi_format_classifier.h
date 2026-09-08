@@ -63,6 +63,10 @@ enum class CsiFormatReasonCode : uint8_t {
   UNEXPECTED_LTF = 5,
   UNKNOWN_LAYOUT = 6,
   MISSING_METADATA = 7,
+  RX_ERROR = 8,
+  RX_END_ERROR = 9,
+  INVALID_ESTIMATE = 10,
+  INVALID_FIRST_WORD = 11,
 };
 
 struct CsiFormatAssessment {
@@ -101,6 +105,14 @@ inline const char *csi_format_reason_code_to_string(CsiFormatReasonCode code) {
       return "unknown_layout";
     case CsiFormatReasonCode::MISSING_METADATA:
       return "missing_metadata";
+    case CsiFormatReasonCode::RX_ERROR:
+      return "rx_error";
+    case CsiFormatReasonCode::RX_END_ERROR:
+      return "rx_end_error";
+    case CsiFormatReasonCode::INVALID_ESTIMATE:
+      return "invalid_estimate";
+    case CsiFormatReasonCode::INVALID_FIRST_WORD:
+      return "invalid_first_word";
     default:
       return "unknown";
   }
@@ -121,18 +133,53 @@ inline CsiFormatAssessment assess_ht20_sensing_format(
     const wifi_csi_info_t *info,
     CsiCaptureProfile profile = CsiCaptureProfile::HT20) {
   CsiFormatAssessment assessment{};
-  if (info == nullptr || info->buf == nullptr || info->len == 0U) {
+  if (info == nullptr) {
     assessment.reason_code = CsiFormatReasonCode::NULL_OR_EMPTY;
     return assessment;
   }
 
   assessment.metadata_source = CsiMetadataSource::WIFI_RX_CTRL;
   assessment.raw_len = info->len;
+  assessment.raw_num_subcarriers = (assessment.raw_len % 2U) == 0U
+      ? static_cast<uint16_t>(assessment.raw_len / 2U) : 0U;
+
+  // Hardware faults take priority over malformed payloads: unrelated bad
+  // reception must not contribute to the format-change reset streak.
+  if (info->rx_ctrl.rx_state != 0U) {
+    assessment.reason_code = CsiFormatReasonCode::RX_ERROR;
+    return assessment;
+  }
+#if CONFIG_SOC_WIFI_HE_SUPPORT
+  if (info->rx_ctrl.rxend_state != 0U) {
+    assessment.reason_code = CsiFormatReasonCode::RX_END_ERROR;
+    return assessment;
+  }
+  if (info->rx_ctrl.rx_channel_estimate_info_vld == 0U) {
+    assessment.reason_code = CsiFormatReasonCode::INVALID_ESTIMATE;
+    return assessment;
+  }
+#endif
+
+  if (info->first_word_invalid) {
+    const bool full_width = info->len == HT20_CSI_LEN || info->len == HT20_CSI_LEN * 2U;
+    // Compact layouts and classic ordering map invalid source pairs onto live
+    // tones. Only independently identified centered guard pairs are safe.
+    if (info->buf == nullptr || !full_width ||
+        detect_ht20_bin_layout(info->buf, HT20_CSI_LEN, true) != Ht20BinLayout::CENTERED) {
+      assessment.reason_code = CsiFormatReasonCode::INVALID_FIRST_WORD;
+      return assessment;
+    }
+  }
+
+  if (info->buf == nullptr || info->len == 0U) {
+    assessment.reason_code = CsiFormatReasonCode::NULL_OR_EMPTY;
+    return assessment;
+  }
+
   if ((assessment.raw_len % 2U) != 0U) {
     assessment.reason_code = CsiFormatReasonCode::BAD_LENGTH;
     return assessment;
   }
-  assessment.raw_num_subcarriers = static_cast<uint16_t>(assessment.raw_len / 2U);
 
   const bool is_ht20 = profile != CsiCaptureProfile::VHT20 &&
                        csi_info_is_ht20_sensing(info);

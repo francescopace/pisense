@@ -422,6 +422,7 @@ std::string NativeDirectFrontend::diagnostics_payload() const {
   out += ",\"csi_pending_frames\":" + std::to_string(runtime_diagnostics.csi_pending_frames);
   out += ",\"csi_pending_frame_capacity\":" + std::to_string(runtime_diagnostics.csi_pending_frame_capacity);
   out += ",\"runtime_motion_event_drops_total\":" + std::to_string(owner_.runtime_events_.motion_state_drops_total());
+  append_runtime_csi_quality_diagnostics_json(&out, runtime_diagnostics);
   append_runtime_performance_diagnostics_json(&out, runtime_diagnostics, false);
   out += ",\"task_stack_high_water_bytes\":" + std::to_string(current_task_stack_high_water_bytes());
 

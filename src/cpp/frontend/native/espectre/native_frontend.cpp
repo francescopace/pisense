@@ -152,6 +152,13 @@ void NativeFrontend::shutdown() {
   }
 }
 
+void NativeFrontend::on_sensing_readiness_changed(const RuntimeSnapshot &snapshot) {
+  (void) snapshot;
+  if (runtime_.operation_state() != RuntimeOperationState::RAW_COLLECTION) {
+    publish_runtime_status_state_();
+  }
+}
+
 void NativeFrontend::on_motion_state_changed(const RuntimeSnapshot &snapshot) {
   if (runtime_.operation_state() == RuntimeOperationState::RAW_COLLECTION || !snapshot.ready_to_publish) {
     return;

@@ -417,7 +417,10 @@ void test_native_frontend_defers_initial_ha_state_until_sensing_is_ready(void) {
   frontend.loop();
   TEST_ASSERT_FALSE(has_mqtt_publish("espectre/v1/devices/0000111122223333/ha/motion_on_hits/state"));
 
-  frontend_runtime_shim::state.last_listener->on_periodic_update(make_ready_snapshot(), 100U);
+  // The controller refreshes its cached snapshot from the backend each loop and
+  // emits readiness from that poll, so the test must make the backend ready.
+  frontend_runtime_shim::state.snapshot = make_ready_snapshot();
+  frontend_runtime_shim::state.emit_threshold_on_next_loop = true;
   frontend.loop();
   for (const char *suffix : {"motion", "movement", "threshold", "motion_on_hits", "motion_off_hits",
                              "calibrate", "detector", "csi_traffic_mode", "traffic_generator_mode"}) {

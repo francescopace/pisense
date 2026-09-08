@@ -85,6 +85,21 @@ def test_runtime_wifi_diagnostics_tolerate_older_or_unavailable_drivers(reader, 
         assert reader(SimpleNamespace(isconnected=lambda: False, status=lambda *_args: -60)) is None
 
 
+def test_runtime_diagnostics_include_native_quality_rejections_without_ring_drops():
+    wlan = SimpleNamespace(csi_filtered=lambda: 100, csi_dropped=lambda: 7)
+    snapshot = diagnostics.collect_runtime_diagnostics_snapshot(
+        wlan=wlan, callback_total=200, filtered_total=3,
+    )
+    assert snapshot["csi_callbacks_total"] == 200
+    assert snapshot["csi_filtered_total"] == 103
+    assert diagnostics.wifi_csi_dropped(wlan) == 7
+    for older_driver in (None, SimpleNamespace()):
+        snapshot = diagnostics.collect_runtime_diagnostics_snapshot(
+            wlan=older_driver, filtered_total=3,
+        )
+        assert snapshot["csi_filtered_total"] == 3
+
+
 def test_runtime_performance_windows_preserve_heap_minimum_and_clear_samples():
     performance = diagnostics.RuntimePerformanceDiagnostics()
     window = performance.WINDOW_INTERVAL_MS

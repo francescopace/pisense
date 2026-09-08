@@ -201,6 +201,11 @@ void MatterFrontend::update_live_telemetry_enabled_() {
   runtime_.set_live_telemetry_enabled(enabled);
 }
 
+void MatterFrontend::on_sensing_readiness_changed(const RuntimeSnapshot &snapshot) {
+  (void) snapshot;
+  (void) direct_bridge_.publish_changes(FrontendCommandChange::SENSING);
+}
+
 void MatterFrontend::on_motion_state_changed(const RuntimeSnapshot &snapshot) {
   if (!snapshot.ready_to_publish) {
     return;

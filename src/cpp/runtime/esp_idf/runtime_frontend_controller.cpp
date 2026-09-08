@@ -73,6 +73,7 @@ bool RuntimeFrontendController::setup(IRuntimeListener *listener) {
   active_config_ = backend->effective_config();
   config_ = active_config_;
   snapshot_ = runtime_->get_snapshot();
+  last_sensing_ready_ = snapshot_.ready_to_publish;
   capabilities_ = runtime_->get_capabilities();
   setup_complete_ = true;
   apply_deferred_shutdown_();
@@ -82,6 +83,15 @@ bool RuntimeFrontendController::setup(IRuntimeListener *listener) {
 void RuntimeFrontendController::loop() {
   if (runtime_) {
     runtime_->loop();
+    cache_snapshot_(runtime_->get_snapshot());
+    if (snapshot_.ready_to_publish != last_sensing_ready_) {
+      last_sensing_ready_ = snapshot_.ready_to_publish;
+      if (listener_ != nullptr) {
+        begin_callback_();
+        listener_->on_sensing_readiness_changed(snapshot_);
+        end_callback_();
+      }
+    }
   }
   apply_deferred_shutdown_();
 }

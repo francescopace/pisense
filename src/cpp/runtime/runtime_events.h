@@ -53,6 +53,16 @@ class IRuntimeListener {
   virtual ~IRuntimeListener() = default;
 
   /**
+   * Public sensing readiness changed, including warm-up and input expiry.
+   *
+   * RuntimeFrontendController emits this from loop(), after caching the current
+   * snapshot. Publish the sensing resource on both availability transitions.
+   *
+   * @param snapshot Current sensing state, including public readiness.
+   */
+  virtual void on_sensing_readiness_changed(const RuntimeSnapshot &snapshot) {}
+
+  /**
    * The debounced motion state changed.
    *
    * Edge-triggered and already filtered by `motion_on_hits` / `motion_off_hits`,

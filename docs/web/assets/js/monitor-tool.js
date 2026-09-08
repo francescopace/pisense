@@ -140,11 +140,15 @@
     }
 
     function monitorStats(data) {
+        const errors = [data.csi_rx_error_total, data.csi_rx_end_error_total,
+            data.csi_invalid_estimate_total, data.csi_invalid_first_word_total];
+        const errorTotal = errors.every(value => Number.isSafeInteger(value) && value >= 0)
+            ? errors.reduce((sum, value) => sum + value, 0) : null;
         monitorSetStat('.js-mon-traffic', data.traffic_tx_pps, 1, ' pps');
         monitorSetStat('.js-mon-callbacks', data.csi_callback_pps, 1, ' pps');
-        monitorSetStat('.js-mon-filtered', data.csi_filtered_pps, 1, ' pps');
-        monitorSetStat('.js-mon-admitted', data.csi_admitted_pps, 1, ' pps');
-        monitorSetStat('.js-mon-channel', data.wifi_channel, 0, '');
+        monitorSetStat('.js-mon-accepted', data.csi_accepted_pps, 1, ' pps');
+        monitorSetStat('.js-mon-errors', errorTotal, 0, ' total');
+        monitorSetStat('.js-mon-occupancy', data.csi_occupancy == null ? null : data.csi_occupancy * 100, 1, '%');
         monitorSetStat('.js-mon-rssi', data.wifi_rssi_dbm, 0, ' dBm');
         monitorSetStat('.js-mon-heap', data.free_memory_kb, 1, ' KiB');
         monitorSetStat('.js-mon-loop', data.loop_time_ms, 2, ' ms');
@@ -346,9 +350,12 @@
             monitorStats({
                 traffic_tx_pps: csiTargetPps(),
                 csi_callback_pps: Math.max(1, csiTargetPps() - 4),
-                csi_filtered_pps: 6,
-                csi_admitted_pps: Math.max(1, csiTargetPps() - 16),
-                wifi_channel: 10,
+                csi_accepted_pps: Math.max(1, csiTargetPps() - 10),
+                csi_rx_error_total: 2,
+                csi_rx_end_error_total: 0,
+                csi_invalid_estimate_total: 4,
+                csi_invalid_first_word_total: 0,
+                csi_occupancy: Math.max(1, csiTargetPps() - 16) / csiTargetPps(),
                 wifi_rssi_dbm: -55,
                 free_memory_kb: 161.4,
                 loop_time_ms: 0.31

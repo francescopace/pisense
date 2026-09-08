@@ -211,7 +211,7 @@ Frontend coverage:
 | `csi_target_pps` | int | `100` | `1-500`; defines detector slot cadence and the managed-traffic target, but never enables or disables traffic |
 | `csi_traffic_mode` | `internal` or `external` | `internal` | Selects device-generated traffic or externally supplied UDP markers and ICMP Echo Requests independently from `csi_target_pps`; persisted legacy `pacing` or `disabled` values migrate once to `internal` |
 | `csi_traffic_multicast_group` | IPv4 multicast address, or empty | `239.255.0.1` | Joined by the UDP listener in `external`. Empty disables the join. Unicast to the device IP still works |
-| `traffic_generator_mode` | `ping`, `dns`, `dns_tcp`, or `wifi_raw` | `ping` | `dns` uses UDP, `dns_tcp` uses persistent TCP, and `wifi_raw` sends Null Data to the AP |
+| `traffic_generator_mode` | `ping`, `dns`, `dns_tcp`, or `wifi_raw` | `ping` | `dns` uses UDP, `dns_tcp` uses persistent TCP, and experimental `wifi_raw` sends Null Data to the AP |
 | `evaluation_interval_ms` | int | `250` | `10-10000` milliseconds between detector evaluations |
 | `motion_on_hits` | int | `4` | `1-20` consecutive evaluation hits for `IDLE -> MOTION` (about `0.75-1.0 s` from physical motion at the default `250 ms` interval) |
 | `motion_off_hits` | int | `3` | `1-20` consecutive evaluation hits for `MOTION -> IDLE` (about `0.50-0.75 s` from physical idle at the same defaults) |
@@ -245,10 +245,15 @@ In `external`, ESP-IDF frontends accept either paced UDP markers or ordinary ICM
 
 Multicast sensing traffic may arrive with the group's multicast MAC or the device's unicast MAC when the access point converts multicast to unicast. Both delivery forms require the configured multicast destination IP, UDP port, and exact marker; frames addressed to another device are rejected.
 
-In internal `ping` mode sends ICMP echo requests, `dns` sends connectionless DNS root queries over UDP, and `dns_tcp` sends length-prefixed queries through a persistent, non-blocking TCP connection. Both DNS modes target the gateway resolver on port `53`, and `dns_tcp` requires that resolver to accept TCP queries. The explicit modes allow deployments to select the protocol that behaves best for their device, Wi-Fi driver, AP, and resolver; there is no automatic fallback. The shared schema default is `ping`. 
-In `wifi_raw` mode sends 24-byte non-QoS 802.11 Null Data frames directly to the associated AP BSSID, using the station MAC and driver-managed sequence numbers. The destination is refreshed whenever the generator starts after association, including after roaming to another BSSID with unchanged IP and channel.
+Internal `ping` mode sends ICMP echo requests, `dns` sends connectionless DNS root queries over UDP, and `dns_tcp` sends length-prefixed queries through a persistent, non-blocking TCP connection. Both DNS modes target the gateway resolver on port `53`, and `dns_tcp` requires that resolver to accept TCP queries. The explicit modes allow deployments to select the protocol that behaves best for their device, Wi-Fi driver, AP, and resolver; there is no automatic fallback. The shared schema default is `ping`.
+
+**`wifi_raw` is experimental.** It can provide steadier sampling than ping on some device, driver, and AP combinations, while others produce no usable ACK CSI. Start with the default `ping`, and validate temporal occupancy, capture-quality counters, and detector readiness before adopting `wifi_raw` on a deployment. A high callback or raw collection rate alone does not establish usable sensing input; HTTP collection itself can generate additional ACKs.
+
+The `wifi_raw` mode sends 24-byte non-QoS 802.11 Null Data frames directly to the associated AP BSSID, using the station MAC and driver-managed sequence numbers. The destination is refreshed whenever the generator starts after association, including after roaming to another BSSID with unchanged IP and channel.
 
 Selecting internal `wifi_raw` automatically selects `lltf20` and ACK capture. A runtime switch stops the generator and reconfigures CSI only when the effective capture profile changes; Wi-Fi stays associated. Leaving that source restores the chip/band capture profile, including when traffic ownership changes to `external`. Profile changes clear pending samples and detector history. Active traffic-mode changes recalibrate Lightweight only, preserving High Accuracy thresholds. ESP32 and ESP32-S2 already use LLTF20, so switching their generator does not cycle CSI.
+
+Missing valid CSI means sensing is unavailable, not quiet. Select another generator explicitly if `wifi_raw` cannot sustain valid input; the runtime does not fall back automatically.
 
 Use [TUNING.md](TUNING.md#traffic-health-and-target-rate) to evaluate packet occupancy or change `csi_target_pps`, and use the frontend README for configuration syntax.
 
