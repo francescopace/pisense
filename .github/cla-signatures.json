@@ -24,6 +24,10 @@
       "userId": 226746019,
       "signedAt": "2026-04-03T18:17:42.969Z",
       "claSha": "2f99c0263af847d68ac550b3df362c848c9cd8b8"
+    },
+    {
+      "login": "RockBase-iot",
+      "signedAt": "2026-09-07"
     }
   ]
 }
